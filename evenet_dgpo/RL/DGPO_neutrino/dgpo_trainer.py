@@ -1707,7 +1707,8 @@ def build_reward_aggregator(
     reward_type = str(getattr(rc, "type", "component_normalized_truth_distance")).strip().lower()
     cn = getattr(rc, "component_normalized", None)
     eps = float(getattr(cn, "eps", 1e-8)) if cn is not None else 1e-8
-    weight = float(getattr(rc, "weight", 1.0))
+    primary_weight = float(getattr(rc, "weight", 1.0))
+    component_weight = float(getattr(cn, "weight", 0.0)) if cn is not None else 0.0
     feature_names = _reward_feature_names()
     agg = RewardAggregator()
     if reward_type in {"calibration_magnitude", "physics_consistency", "ztautau_calibration_magnitude"}:
@@ -1717,36 +1718,40 @@ def build_reward_aggregator(
         )
         agg.add(
             CalibrationMagnitudeReward(feature_names=feature_names),
-            weight,
+            primary_weight,
         )
-        return agg
 
-    if feature_names is not None:
-        scales = build_feature_space_scales(
-            normalization_dict,
-            feature_names=feature_names,
+    use_component_reward = reward_type == "component_normalized_truth_distance" or component_weight > 0.0
+    if use_component_reward:
+        if feature_names is not None:
+            scales = build_feature_space_scales(
+                normalization_dict,
+                feature_names=feature_names,
+            )
+            _log.info(
+                "[DGPO/reward] feature-space scales from normalization.pt invisible_std for %s: %s",
+                feature_names,
+                {k: round(v, 4) for k, v in scales.items()},
+            )
+        else:
+            scales = _scales_from_normalization(normalization_dict)
+            _log.info(
+                "[DGPO/reward] component_normalized scales from normalization.pt "
+                "invisible_cartesian_std [px, py, pz]: %s",
+                {k: round(v, 4) for k, v in scales.items()},
+            )
+        agg.add(
+            ComponentNormalizedTruthDistanceReward(
+                scales,
+                cartesian=_truth_generation_cartesian(),
+                eps=eps,
+                feature_names=feature_names,
+            ),
+            primary_weight if reward_type == "component_normalized_truth_distance" else component_weight,
         )
-        _log.info(
-            "[DGPO/reward] feature-space scales from normalization.pt invisible_std for %s: %s",
-            feature_names,
-            {k: round(v, 4) for k, v in scales.items()},
-        )
-    else:
-        scales = _scales_from_normalization(normalization_dict)
-        _log.info(
-            "[DGPO/reward] component_normalized scales from normalization.pt "
-            "invisible_cartesian_std [px, py, pz]: %s",
-            {k: round(v, 4) for k, v in scales.items()},
-        )
-    agg.add(
-        ComponentNormalizedTruthDistanceReward(
-            scales,
-            cartesian=_truth_generation_cartesian(),
-            eps=eps,
-            feature_names=feature_names,
-        ),
-        weight,
-    )
+
+    if not agg.sources:
+        raise ValueError(f"unsupported reward_config.type={reward_type!r}")
     return agg
 
 
@@ -4319,9 +4324,10 @@ def _dgpo_wandb_hyperparameter_definitions() -> dict[str, str]:
         "dgpo.validation_tqdm_k_chains": "If true: show a tqdm progress bar over the K DDIM chains per validation batch. Typical: true (helps see validation progress).",
         "dgpo.validation_tqdm_ddim": "If true: show a tqdm progress bar for every DDIM step within each chain (very verbose). Typical: false (too much output).",
         # --- reward_config ---
-        "reward_config.type": "Reward backend. 'component_normalized_truth_distance' uses truth-matching squared error; 'calibration_magnitude' uses post-calibration tau direction-change magnitude (smaller is better) as the physics-consistency reward.",
-        "reward_config.weight": "Global multiplier on the configured reward source before summing into the combined DGPO reward. Typical: 1.0.",
-        "reward_config.component_normalized.eps": "Numerical stability added to per-component scale denominators in the truth-distance reward. Unused by calibration_magnitude.",
+        "reward_config.type": "Primary reward backend. 'component_normalized_truth_distance' uses truth-matching squared error; 'calibration_magnitude' uses post-calibration tau direction-change magnitude (smaller is better) as the primary physics-consistency reward.",
+        "reward_config.weight": "Weight of the primary reward selected by reward_config.type before summing into the combined DGPO reward. Typical: 1.0.",
+        "reward_config.component_normalized.weight": "Optional additive weight for the original truth-matching reward when the primary reward is calibration_magnitude. Set >0 to add the MSE-style term back into the combined reward; ignored when reward_config.type=component_normalized_truth_distance because that mode already uses reward_config.weight.",
+        "reward_config.component_normalized.eps": "Numerical stability added to per-component scale denominators in the truth-distance reward.",
     }
 
 

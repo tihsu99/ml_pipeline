@@ -171,6 +171,9 @@ Check these fields:
 - `Subcategories`: signal channel labels
 - `NeutrinoPrediction`: channels used for invisible-particle training and
   prediction
+- `EveNetEvaluation.post_calibration`: whether monitoring and QI export apply
+  the back-to-back momentum calibration after prediction; omitted defaults to
+  `true`
 
 ### Training Configuration
 

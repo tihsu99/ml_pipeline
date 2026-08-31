@@ -184,6 +184,45 @@ class TestRewardAggregator(unittest.TestCase):
         self.assertEqual(total.shape, (K, B))
         self.assertIn("component_normalized_truth_distance", breakdown)
 
+    def test_multiple_sources_are_added(self):
+        B, K = 1, 2
+        truth = torch.tensor([[[0.0, 0.0], [0.0, 0.0]]], dtype=torch.float32)
+        batch = {
+            "x_invisible": truth,
+            "x_invisible_mask": torch.ones(1, 2),
+            "lead_a_visible_px": torch.tensor([1.0]),
+            "lead_a_visible_py": torch.tensor([0.0]),
+            "lead_a_visible_pz": torch.tensor([0.0]),
+            "lead_b_visible_px": torch.tensor([-1.0]),
+            "lead_b_visible_py": torch.tensor([0.0]),
+            "lead_b_visible_pz": torch.tensor([0.0]),
+        }
+        candidates = torch.tensor(
+            [
+                [[[0.0, 0.0], [0.0, 0.0]]],
+                [[[0.0, 0.4], [0.0, -0.6]]],
+            ],
+            dtype=torch.float32,
+        )
+        mse_reward = ComponentNormalizedTruthDistanceReward(
+            {
+                "nu1_theta": 1.0,
+                "nu1_phi": 1.0,
+                "nu2_theta": 1.0,
+                "nu2_phi": 1.0,
+            },
+            feature_names=("theta", "phi"),
+        )
+        calib_reward = CalibrationMagnitudeReward(feature_names=("theta", "phi"))
+        agg = RewardAggregator()
+        agg.add(mse_reward, 0.5)
+        agg.add(calib_reward, 2.0)
+
+        total, breakdown = agg.compute(candidates, batch)
+
+        expected = 0.5 * breakdown["component_normalized_truth_distance"] + 2.0 * breakdown["calibration_magnitude"]
+        torch.testing.assert_close(total, expected)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -294,4 +294,5 @@ reward_config:
   type: component_normalized_truth_distance
   weight: 1.0
   component_normalized:
+    weight: 0.0
     eps: 1.0e-8

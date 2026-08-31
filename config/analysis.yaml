@@ -77,6 +77,11 @@ EveNetPrediction:
     - Ztautau_mue
     - Ztautau_others
 
+EveNetEvaluation:
+  # false keeps the raw EveNet tau directions without enforcing the
+  # post-prediction back-to-back momentum calibration.
+  post_calibration: false
+
 EveNetInput:
   # false keeps the historical point-cloud collection.
   # true keeps charged particles and photons, dropping other neutral particles

@@ -36,6 +36,7 @@ reward_config:
   weight: 1.0
   feature_names: [theta, phi]
   component_normalized:
+    weight: 1.0
     eps: 1.0e-8
 
 ztautau_domain:

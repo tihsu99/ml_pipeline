@@ -21,6 +21,7 @@ except ModuleNotFoundError:
 import math
 from generate_event_info_yaml import parse_feature_config
 from common import build_classification_lookup, channel_latex_label, process_latex_label, post_calibrate_tau_tau, event_preselection_mask
+from evaluation_config import post_calibration_enabled
 from plot_style import plot_data_mc_histogram_from_counts, plot_truth_prediction_bundle
 from quantum.observables_builder import build_observables, get_observable_names
 
@@ -627,7 +628,10 @@ CM_ENERGY = 91.2 # GeV
 
 
 
-def build_evenet_observables(events: ak.Array) -> dict[str, np.ndarray] | None:
+def build_evenet_observables(
+    events: ak.Array,
+    post_calibration: bool,
+) -> dict[str, np.ndarray] | None:
     try:
         import vector
         vector.register_awkward()
@@ -689,7 +693,8 @@ def build_evenet_observables(events: ak.Array) -> dict[str, np.ndarray] | None:
     )
 
 
-    tau_a, tau_b = post_calibrate_tau_tau(tau_a, tau_b)
+    if post_calibration:
+        tau_a, tau_b = post_calibrate_tau_tau(tau_a, tau_b)
 
     observables = build_observables(
         tau_a_p4=tau_a,
@@ -783,7 +788,10 @@ def process_quantum_observable(payload: dict[str, Any]) -> dict[str, Any]:
                     gc.collect()
                     continue
                 target_observables = build_target_observables(events)
-                evenet_observables = build_evenet_observables(events)
+                evenet_observables = build_evenet_observables(
+                    events,
+                    post_calibration=payload["post_calibration"],
+                )
                 weights = event_weights(events, payload["weight_column"])
                 source_values = {
                     "truth": observable_values(events, "truth", observable),
@@ -900,6 +908,7 @@ def main() -> None:
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     config = load_config(args.config)
+    post_calibration = post_calibration_enabled(config)
     feature_config = parse_feature_config(config)
 
     # data_files = build_sample_map(args.data_dir, "data", combine=True)
@@ -913,6 +922,7 @@ def main() -> None:
         "weight_column": args.weight_column or None,
         "row_groups_per_chunk": args.row_groups_per_chunk,
         "label_lookup": category_lookup_payload(config),
+        "post_calibration": post_calibration,
     }
 
     all_results: dict[str, Any] = {
@@ -920,6 +930,7 @@ def main() -> None:
         "mc_samples": {name: len(files) for name, files in mc_files.items()},
         "max_events": args.max_events,
         "weight_column": args.weight_column,
+        "post_calibration": post_calibration,
         "neutrino_prediction_labels": sorted(neutrino_prediction_labels(config)),
     }
 

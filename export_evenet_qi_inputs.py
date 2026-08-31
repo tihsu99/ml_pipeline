@@ -26,6 +26,7 @@ if str(ML_PIPELINE_DIR) not in sys.path:
     sys.path.insert(0, str(ML_PIPELINE_DIR))
 
 from ml_pipeline.build_evenet_input_from_parquet import read_file_initial_total_num_events
+from ml_pipeline.evaluation_config import post_calibration_enabled
 from ml_pipeline.common import (
     build_classification_lookup,
     event_preselection_mask,
@@ -430,7 +431,10 @@ def invalid_calibration_fields(num_events: int) -> dict[str, np.ndarray]:
     }
 
 
-def evenet_tau_pair(events: ak.Array) -> tuple[ak.Array, ak.Array, np.ndarray, dict[str, np.ndarray]]:
+def evenet_tau_pair(
+    events: ak.Array,
+    post_calibration: bool,
+) -> tuple[ak.Array, ak.Array, np.ndarray, dict[str, np.ndarray]]:
     vis_a = p4_from_fields(events, "lead_a_visible")
     vis_b = p4_from_fields(events, "lead_b_visible")
     theta_a = vis_a.theta + events["evenet_invisible_a_theta"]
@@ -448,24 +452,34 @@ def evenet_tau_pair(events: ak.Array) -> tuple[ak.Array, ak.Array, np.ndarray, d
         {"pt": momentum * np.sin(theta_b), "theta": theta_b, "phi": phi_b, "m": ak.ones_like(theta_b) * TAU_MASS_GEV},
         with_name="Momentum4D",
     )
-    tau_a, tau_b = post_calibrate_tau_tau(tau_a_before, tau_b_before)
+    if post_calibration:
+        tau_a, tau_b = post_calibrate_tau_tau(tau_a_before, tau_b_before)
+    else:
+        tau_a, tau_b = tau_a_before, tau_b_before
 
     valid = to_numpy(events["evenet_invisible_a_valid"], bool) & to_numpy(events["evenet_invisible_b_valid"], bool)
     valid &= finite_p4(vis_a) & finite_p4(vis_b) & finite_p4(tau_a) & finite_p4(tau_b)
-    calibration_delta_r_a = np.asarray(delta_r(tau_a_before, tau_a), dtype=np.float32)
-    calibration_delta_r_b = np.asarray(delta_r(tau_b_before, tau_b), dtype=np.float32)
-    calibration_fields = {
-        "calibration_deltaR_a": np.asarray(np.where(valid, calibration_delta_r_a, np.nan), dtype=np.float32),
-        "calibration_deltaR_b": np.asarray(np.where(valid, calibration_delta_r_b, np.nan), dtype=np.float32),
-        "calibration_deltaR_sum": np.asarray(
-            np.where(valid, calibration_delta_r_a + calibration_delta_r_b, np.nan),
-            dtype=np.float32,
-        ),
-    }
+    if post_calibration:
+        calibration_delta_r_a = np.asarray(delta_r(tau_a_before, tau_a), dtype=np.float32)
+        calibration_delta_r_b = np.asarray(delta_r(tau_b_before, tau_b), dtype=np.float32)
+        calibration_fields = {
+            "calibration_deltaR_a": np.asarray(np.where(valid, calibration_delta_r_a, np.nan), dtype=np.float32),
+            "calibration_deltaR_b": np.asarray(np.where(valid, calibration_delta_r_b, np.nan), dtype=np.float32),
+            "calibration_deltaR_sum": np.asarray(
+                np.where(valid, calibration_delta_r_a + calibration_delta_r_b, np.nan),
+                dtype=np.float32,
+            ),
+        }
+    else:
+        calibration_fields = invalid_calibration_fields(len(events))
     return tau_a, tau_b, valid, calibration_fields
 
 
-def method_observables(events: ak.Array, method: str) -> tuple[dict[str, Any], np.ndarray, dict[str, np.ndarray]]:
+def method_observables(
+    events: ak.Array,
+    method: str,
+    post_calibration: bool,
+) -> tuple[dict[str, Any], np.ndarray, dict[str, np.ndarray]]:
     names = export_observable_names()
     if method == "truth":
         if all(f"truth_{name}" in events.fields or name == "mtautau" for name in names):
@@ -518,7 +532,10 @@ def method_observables(events: ak.Array, method: str) -> tuple[dict[str, Any], n
         tau_a, tau_b, valid = target_tau_pair(events)
         calibration_fields = invalid_calibration_fields(len(events))
     elif method == "evenet":
-        tau_a, tau_b, valid, calibration_fields = evenet_tau_pair(events)
+        tau_a, tau_b, valid, calibration_fields = evenet_tau_pair(
+            events,
+            post_calibration=post_calibration,
+        )
     else:
         raise ValueError(f"Unknown method {method}")
 
@@ -617,10 +634,15 @@ def export_method_events(
     config: dict[str, Any],
     regions: list[str],
     mc_weight_scale: float,
+    post_calibration: bool,
 ) -> ak.Array:
     weights = prediction_weight(sample_key, sample_cfg, events, mc_weight_scale)
     output = base_fields(events, sample_key, config, weights)
-    observables, valid, calibration_fields = method_observables(events, method)
+    observables, valid, calibration_fields = method_observables(
+        events,
+        method,
+        post_calibration=post_calibration,
+    )
     output.update(observables)
     output.update(calibration_fields)
     output["flags_valid"] = valid
@@ -1076,7 +1098,7 @@ def prediction_sample_keys(events: ak.Array, samples: dict[str, dict[str, Any]])
 
 
 def export_prediction_file(args: tuple[Any, ...]) -> dict[str, int]:
-    pred_path, config, samples, methods, regions, output_root, batch_size, compression, start_index, mc_weight_scale = args
+    pred_path, config, samples, methods, regions, output_root, batch_size, compression, start_index, mc_weight_scale, post_calibration = args
     counts: dict[str, int] = {}
     fragment_index = start_index
     for events in iter_batches(pred_path, batch_size, prediction_columns(methods, regions)):
@@ -1095,6 +1117,7 @@ def export_prediction_file(args: tuple[Any, ...]) -> dict[str, int]:
                     config,
                     regions,
                     mc_weight_scale,
+                    post_calibration,
                 )
                 record_fragment(method_events, output_root, method, sample_key, fragment_index, regions, compression, counts)
             fragment_index += 1
@@ -1205,6 +1228,7 @@ def main() -> None:
     if args.pseudo_data:
         raise ValueError("--pseudo-data has been removed from export_evenet_qi_inputs.py. Export real data and MC directly.")
     config = read_yaml(args.analysis_config)
+    post_calibration = post_calibration_enabled(config)
     samples = sample_configs(config)
     raw_weight_infos = build_raw_weight_info(config, samples)
     regions = args.regions or neutrino_prediction_regions(config)
@@ -1251,6 +1275,7 @@ def main() -> None:
             args.compression,
             job_index,
             mc_weight_scale,
+            post_calibration,
         ))
         job_index += 100_000
 
@@ -1274,6 +1299,7 @@ def main() -> None:
         "configs": config_paths,
         "mc_split_fraction": args.mc_split_fraction,
         "mc_prediction_weight_scale": mc_weight_scale,
+        "post_calibration": post_calibration,
         "raw_weight_info": {sample_key: asdict(info) for sample_key, info in raw_weight_infos.items()},
     }
     (output_root / "export_summary.json").write_text(json.dumps(summary, indent=2))
