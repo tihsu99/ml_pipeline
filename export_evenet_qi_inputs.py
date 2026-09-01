@@ -1021,8 +1021,7 @@ def p4_columns(prefix: str) -> set[str]:
 def prediction_columns(methods: list[str], regions: list[str]) -> set[str]:
     columns = common_export_columns(regions)
     names = export_observable_names()
-    if "truth" in methods:
-        columns.update(f"truth_{name}" for name in names)
+    columns.update(f"truth_{name}" for name in names)
     if "target" in methods:
         columns.update(p4_columns("lead_a_visible"))
         columns.update(p4_columns("lead_b_visible"))
