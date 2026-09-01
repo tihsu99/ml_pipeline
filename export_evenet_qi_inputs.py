@@ -852,7 +852,7 @@ def write_tree(events: ak.Array, sample_dir: Path, sample_name: str, regions: li
 def clean_method_outputs(output_root: Path, methods: list[str]) -> None:
     for method in methods:
         method_dir = output_root / method
-        for child_name in ("processed", "_fragments"):
+        for child_name in ("processed", "_fragments", "run/response_matrices", "run/response_matrices_VR"):
             child = method_dir / child_name
             if child.exists():
                 shutil.rmtree(child)
