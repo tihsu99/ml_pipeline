@@ -820,7 +820,9 @@ python3 ml_pipeline/compare_evenet_predictions.py \
 ```
 
 The comparison uses each method's own truth target and therefore does not
-require row alignment between methods. If `x_invisible` is absent, the
+require row alignment between methods. It reads both nested `x_invisible` and
+EveNet-preprocessed flattened columns such as `x_invisible:0:0`. If both forms
+are absent, the
 default `target_source: auto` reconstructs the direction offsets from the
 visible and target-missing three-vectors stored in the prediction parquet. It
 automatically skips data parquets that have no truth target. It writes:

@@ -147,12 +147,10 @@ def four_vector_target_columns(
         missing = p3_fields(
             present,
             (
-                f"target_{leg}_invisible",
                 f"target_{leg}_missing",
                 f"target_missing_{leg}",
                 f"lead_{leg}_missing",
                 "target_missing",
-                "target_invisible",
             ),
         )
         if visible is None or missing is None:
@@ -228,14 +226,33 @@ def load_method(
         if weight_column:
             required.add(weight_column)
         has_tensor_target = {"x_invisible", "x_invisible_mask"}.issubset(present)
+        flat_target_columns = {
+            (leg, feature): f"x_invisible:{slot_index[leg]}:{feature_index[feature]}"
+            for leg in legs
+            for feature in features
+        }
+        flat_mask_columns = {
+            leg: f"x_invisible_mask:{slot_index[leg]}" for leg in legs
+        }
+        has_flat_tensor_target = set(flat_target_columns.values()).issubset(present) and set(
+            flat_mask_columns.values()
+        ).issubset(present)
         target_p3_fields = four_vector_target_columns(present, legs)
-        if target_source == "x_invisible" or (target_source == "auto" and has_tensor_target):
-            if not has_tensor_target:
+        if target_source == "x_invisible" or (
+            target_source == "auto" and (has_tensor_target or has_flat_tensor_target)
+        ):
+            if not has_tensor_target and not has_flat_tensor_target:
                 raise ValueError(
-                    f"{path} has no x_invisible/x_invisible_mask columns required by target_source=x_invisible."
+                    f"{path} has no nested or flattened x_invisible target columns required "
+                    "by target_source=x_invisible."
                 )
-            file_target_source = "x_invisible"
-            required.update(("x_invisible", "x_invisible_mask"))
+            if has_tensor_target:
+                file_target_source = "x_invisible"
+                required.update(("x_invisible", "x_invisible_mask"))
+            else:
+                file_target_source = "x_invisible_flattened"
+                required.update(flat_target_columns.values())
+                required.update(flat_mask_columns.values())
         else:
             if target_p3_fields is None:
                 if target_source == "auto":
@@ -286,6 +303,11 @@ def load_method(
                     )
                 derived_targets = None
                 derived_target_masks = None
+            elif file_target_source == "x_invisible_flattened":
+                tensor_targets = None
+                tensor_target_mask = None
+                derived_targets = None
+                derived_target_masks = None
             else:
                 derived_targets, derived_target_masks = angular_target_values(
                     events, target_p3_fields, legs
@@ -305,6 +327,12 @@ def load_method(
                         for feature in features
                     }
                     target_valid = tensor_target_mask[:, slot]
+                elif file_target_source == "x_invisible_flattened":
+                    targets_by_feature = {
+                        feature: to_numpy(events[flat_target_columns[(leg, feature)]])
+                        for feature in features
+                    }
+                    target_valid = to_numpy(events[flat_mask_columns[leg]], bool)
                 else:
                     targets_by_feature = derived_targets[leg]
                     target_valid = derived_target_masks[leg]
