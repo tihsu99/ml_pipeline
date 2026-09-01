@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass
 import glob
 import json
 import math
+import os
 from pathlib import Path
 import shutil
 import sys
@@ -18,16 +19,20 @@ import pyarrow.parquet as pq
 import vector
 import yaml
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-ML_PIPELINE_DIR = REPO_ROOT / "ml_pipeline"
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+ML_PIPELINE_DIR = Path(__file__).resolve().parent
+REPO_ROOT = ML_PIPELINE_DIR.parent
+LEP_TREE_ANA_ROOT = Path(os.environ.get("LEP_TREE_ANA_ROOT", REPO_ROOT)).expanduser().resolve()
+if not (LEP_TREE_ANA_ROOT / "quantum" / "observables_builder.py").is_file():
+    sibling = REPO_ROOT / "lep_tree_ana"
+    if (sibling / "quantum" / "observables_builder.py").is_file():
+        LEP_TREE_ANA_ROOT = sibling
+if str(LEP_TREE_ANA_ROOT) not in sys.path:
+    sys.path.insert(0, str(LEP_TREE_ANA_ROOT))
 if str(ML_PIPELINE_DIR) not in sys.path:
     sys.path.insert(0, str(ML_PIPELINE_DIR))
 
-from ml_pipeline.build_evenet_input_from_parquet import read_file_initial_total_num_events
-from ml_pipeline.evaluation_config import post_calibration_enabled
-from ml_pipeline.common import (
+from evaluation_config import post_calibration_enabled, qi_region_to_signals
+from common import (
     build_classification_lookup,
     event_preselection_mask,
     post_calibrate_tau_tau,
@@ -109,6 +114,15 @@ def export_observable_names() -> tuple[str, ...]:
     return tuple(get_observable_names())
 
 
+def read_file_initial_total_num_events(path: str) -> float | None:
+    parquet = pq.ParquetFile(path)
+    for record_batch in parquet.iter_batches(batch_size=1, columns=["initial_total_num_events"]):
+        values = ak.to_numpy(ak.from_arrow(record_batch)["initial_total_num_events"], allow_missing=False)
+        if len(values):
+            return float(values[0])
+    return None
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Export EveNet prediction parquets as nominal QI unfolding inputs."
@@ -147,7 +161,8 @@ def resolve_parquets(paths: list[Path]) -> list[Path]:
         candidates = [Path(match) for match in matches] if matches else [Path(text)]
         for candidate in candidates:
             if candidate.is_dir():
-                output.extend(sorted(candidate.glob("*__evenet_pred.*.parquet")))
+                merged = sorted(candidate.glob("*__evenet_pred.parquet"))
+                output.extend(merged or sorted(candidate.glob("*__evenet_pred.part*.parquet")))
             else:
                 output.append(candidate)
     return [path.resolve() for path in output]
@@ -606,21 +621,39 @@ def region_masks(events: ak.Array, method: str, sample_key: str, regions: list[s
     truth_label = target_labels(events, sample_key, config)
     pred_label = evenet_labels(events, config) if method == "evenet" else None
     output: dict[str, np.ndarray] = {}
-    categories_cfg = signal_categories(config, regions)
+    region_to_signals = qi_region_to_signals(config, regions)
+    unknown_regions = [region for region in regions if region not in region_to_signals]
+    if unknown_regions:
+        raise ValueError(
+            "QI regions are missing from QIAnalysis.region_to_signals: "
+            + ", ".join(unknown_regions)
+        )
+    signal_labels = [
+        signal
+        for region in regions
+        for signal in region_to_signals[region]
+    ]
+    categories_cfg = signal_categories(config, signal_labels)
     categories = to_numpy(events["event_category"], np.int64) if "event_category" in events.fields else None
 
     for region in regions:
         cut = f"{region}_cut"
+        region_signals = region_to_signals[region]
         if region.startswith("Ztautau_") and method == "evenet":
             if pred_label is None:
                 raise ValueError("Internal error: missing EveNet labels for EveNet region masks.")
-            output[region] = pred_label == region
+            output[region] = np.isin(pred_label, region_signals)
         elif cut in events.fields:
             output[region] = to_numpy(events[cut], bool)
-        elif region.startswith("Ztautau_") and region in categories_cfg and categories is not None:
-            output[region] = np.isin(categories, categories_cfg[region])
+        elif region.startswith("Ztautau_") and categories is not None:
+            region_categories = [
+                category
+                for signal in region_signals
+                for category in categories_cfg.get(signal, [])
+            ]
+            output[region] = np.isin(categories, region_categories)
         elif region.startswith("Ztautau_"):
-            output[region] = truth_label == region
+            output[region] = np.isin(truth_label, region_signals)
         else:
             raise ValueError(f"Unsupported QI region '{region}'.")
     return output
@@ -1165,8 +1198,9 @@ def run_jobs(jobs: list[tuple[Any, ...]], fn, workers: int) -> dict[str, int]:
     return merge_counts(results)
 
 
-def processor_region_to_signals(regions: list[str], signal_cfg: dict[str, list[int]]) -> dict[str, list[str]]:
-    return {region: [region] for region in regions if region in signal_cfg}
+def processor_region_to_signals(config: dict[str, Any], regions: list[str]) -> dict[str, list[str]]:
+    mapping = qi_region_to_signals(config, regions)
+    return {region: mapping[region] for region in regions}
 
 
 def write_analysis_config(
@@ -1176,8 +1210,13 @@ def write_analysis_config(
     samples: dict[str, dict[str, Any]],
     regions: list[str],
 ) -> Path:
-    signal_cfg = signal_categories(config, regions)
-    region_to_signals = processor_region_to_signals(regions, signal_cfg)
+    region_to_signals = processor_region_to_signals(config, regions)
+    signal_labels = list(dict.fromkeys(
+        signal
+        for region in regions
+        for signal in region_to_signals[region]
+    ))
+    signal_cfg = signal_categories(config, signal_labels)
     data_loaders = {}
     for sample_key in SAMPLE_ORDER:
         if sample_key not in samples and sample_key != "data94":
@@ -1231,9 +1270,9 @@ def main() -> None:
     post_calibration = post_calibration_enabled(config)
     samples = sample_configs(config)
     raw_weight_infos = build_raw_weight_info(config, samples)
-    regions = args.regions or neutrino_prediction_regions(config)
-    if not regions:
-        regions = class_regions(config)
+    qi_mapping = (config.get("QIAnalysis") or {}).get("region_to_signals")
+    regions = args.regions or (list(qi_mapping) if isinstance(qi_mapping, dict) else None)
+    regions = regions or neutrino_prediction_regions(config) or class_regions(config)
     mc_weight_scale = mc_prediction_weight_scale(args.mc_split_fraction)
     output_root = args.base_dir
     output_root.mkdir(parents=True, exist_ok=True)
@@ -1294,6 +1333,7 @@ def main() -> None:
         "prediction_files": [str(path) for path in prediction_paths],
         "methods": args.methods,
         "regions": regions,
+        "region_to_signals": processor_region_to_signals(config, regions),
         "counts": counts,
         "merged_outputs": merged_outputs,
         "configs": config_paths,

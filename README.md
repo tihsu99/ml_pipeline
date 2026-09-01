@@ -14,6 +14,90 @@ The complete workflow is:
 6. export predictions to the central QI layout
 7. run the central QI and forward-folding processors
 
+## Evaluate Checkpoint A and B
+
+This path uses standard `EveNet-Full`; `evenet_dgpo` is not involved. Run the
+following once with checkpoint A and once with checkpoint B. No common random
+seed or other A/B alignment is imposed.
+
+From this standalone `ml_pipeline` checkout, set the external checkouts and
+artifacts:
+
+```bash
+cd /path/to/ml_pipeline
+
+export EVENET_ROOT=/path/to/EveNet-Full
+export LEP_TREE_ANA_ROOT=/path/to/lep_tree_ana
+export PYTHONPATH="$PWD:$EVENET_ROOT:$LEP_TREE_ANA_ROOT:$PYTHONPATH"
+
+export LABEL=A
+export CHECKPOINT=/path/to/checkpoint_A.ckpt
+export CLASSIFICATION_CHECKPOINT=/path/to/classification.ckpt
+export NORMALIZATION_FILE=/path/to/normalization.pt
+export MC_PARQUET=/path/to/evenet_test.parquet
+export DATA_PARQUET=/path/to/evenet_data.parquet
+export OUTPUT_ROOT=/path/to/checkpoint_evaluation
+export RUN_DIR="$OUTPUT_ROOT/$LABEL"
+```
+
+Predict MC and data. The split correction is MC-only; change `0.5` if the MC
+parquet represents a different fraction of the full sample.
+
+```bash
+python3 predict_evenet.py \
+  --analysis-config config/analysis.yaml \
+  --train-config config/train_pretrain.yaml \
+  --evenet-config config/evenet_schema.yaml \
+  --normalization-file "$NORMALIZATION_FILE" \
+  --classification-checkpoint "$CLASSIFICATION_CHECKPOINT" \
+  --diffusion-checkpoint "$CHECKPOINT" \
+  --converted-parquet "$MC_PARQUET" \
+  --converted-split-fraction 0.5 \
+  --output-dir "$RUN_DIR/prediction/mc" \
+  --num-gpus 4 --num-steps 200
+
+python3 predict_evenet.py \
+  --analysis-config config/analysis.yaml \
+  --train-config config/train_pretrain.yaml \
+  --evenet-config config/evenet_schema.yaml \
+  --normalization-file "$NORMALIZATION_FILE" \
+  --classification-checkpoint "$CLASSIFICATION_CHECKPOINT" \
+  --diffusion-checkpoint "$CHECKPOINT" \
+  --converted-parquet "$DATA_PARQUET" \
+  --output-dir "$RUN_DIR/prediction/data" \
+  --num-gpus 4 --num-steps 200
+```
+
+Export and evaluate with the current `lep_tree_ana`:
+
+```bash
+python3 export_evenet_qi_inputs.py \
+  --analysis-config config/analysis.yaml \
+  --prediction-parquet "$RUN_DIR/prediction/mc" "$RUN_DIR/prediction/data" \
+  --base-dir "$RUN_DIR/qi" \
+  --methods evenet
+
+source "$LEP_TREE_ANA_ROOT/setup.sh"
+python3 "$LEP_TREE_ANA_ROOT/bin/tree_ana" \
+  --config-yaml "$RUN_DIR/qi/evenet/config_evenet.yaml"
+```
+
+Repeat after setting `LABEL=B`, `CHECKPOINT=/path/to/checkpoint_B.ckpt`, and a
+new `RUN_DIR`. Other artifacts may also differ; the pipeline does not require A
+and B to share them. Finally compare the existing results:
+
+```bash
+python3 extract_qi_final_measurements.py \
+  --method A:"$OUTPUT_ROOT/A/qi/evenet/run/QI_analysis/results.txt" \
+  --method B:"$OUTPUT_ROOT/B/qi/evenet/run/QI_analysis/results.txt" \
+  --output-prefix "$OUTPUT_ROOT/A_vs_B"
+```
+
+By default the exporter keeps the original one-region/one-signal QI mapping.
+If a checkpoint should use the current combined scratch prescription, add a
+`QIAnalysis.region_to_signals` mapping to that checkpoint's analysis YAML; the
+generated `config_evenet.yaml` passes it directly to `lep_tree_ana`.
+
 ## Repository Structure
 
 `ml_pipeline` is a submodule of `lep_tree_ana`. It also contains two nested
