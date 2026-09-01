@@ -1,4 +1,6 @@
 PredictionComparison:
+  # auto: prefer x_invisible, otherwise reconstruct offsets from target four-vectors.
+  target_source: auto
   # Null means: use all Invisible features, in their analysis.yaml order.
   features: null
   legs: [a, b]
@@ -9,4 +11,3 @@ PredictionComparison:
   max_events_per_method: 200000
   weight_column: event_weight
   joint_features: [theta, phi]
-

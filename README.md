@@ -819,8 +819,11 @@ python3 ml_pipeline/compare_evenet_predictions.py \
   --output-dir "$CAMPAIGN_DIR/prediction-comparison"
 ```
 
-The comparison uses each method's own `x_invisible` target and therefore does
-not require row alignment between methods. It writes:
+The comparison uses each method's own truth target and therefore does not
+require row alignment between methods. If `x_invisible` is absent, the
+default `target_source: auto` reconstructs the direction offsets from the
+visible and target-missing three-vectors stored in the prediction parquet. It
+automatically skips data parquets that have no truth target. It writes:
 
 - normalized 1D target and prediction distributions;
 - a target-versus-prediction 2D map for every method, leg, and diffusion feature;

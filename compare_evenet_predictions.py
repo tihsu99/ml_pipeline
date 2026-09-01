@@ -111,6 +111,90 @@ def to_numpy(values: Any, dtype: Any = np.float64) -> np.ndarray:
     return np.asarray(ak.to_numpy(values, allow_missing=False), dtype=dtype)
 
 
+def p3_fields(present: set[str], prefixes: tuple[str, ...]) -> dict[str, str] | None:
+    fields = {}
+    for component in ("px", "py", "pz"):
+        field = next(
+            (f"{prefix}_{component}" for prefix in prefixes if f"{prefix}_{component}" in present),
+            None,
+        )
+        if field is None:
+            return None
+        fields[component] = field
+    return fields
+
+
+def p3_values(events: ak.Array, fields: dict[str, str], slot: int) -> dict[str, np.ndarray]:
+    output = {}
+    for component, field in fields.items():
+        values = to_numpy(events[field])
+        if values.ndim == 2:
+            if values.shape[1] <= slot:
+                raise ValueError(f"{field} has shape {values.shape}; slot {slot} is unavailable.")
+            values = values[:, slot]
+        elif values.ndim != 1:
+            raise ValueError(f"{field} has shape {values.shape}; expected one value per event or per leg.")
+        output[component] = values
+    return output
+
+
+def four_vector_target_columns(
+    present: set[str], legs: list[str]
+) -> dict[str, tuple[dict[str, str], dict[str, str]]] | None:
+    output = {}
+    for leg in legs:
+        visible = p3_fields(present, (f"lead_{leg}_visible", f"visible_{leg}", "visible"))
+        missing = p3_fields(
+            present,
+            (
+                f"target_{leg}_invisible",
+                f"target_{leg}_missing",
+                f"target_missing_{leg}",
+                f"lead_{leg}_missing",
+                "target_missing",
+                "target_invisible",
+            ),
+        )
+        if visible is None or missing is None:
+            return None
+        output[leg] = (visible, missing)
+    return output
+
+
+def angular_target_values(
+    events: ak.Array,
+    fields_by_leg: dict[str, tuple[dict[str, str], dict[str, str]]],
+    legs: list[str],
+) -> tuple[dict[str, dict[str, np.ndarray]], dict[str, np.ndarray]]:
+    targets = {}
+    masks = {}
+    slot_index = {"a": 0, "b": 1}
+    for leg in legs:
+        visible = p3_values(events, fields_by_leg[leg][0], slot_index[leg])
+        missing = p3_values(events, fields_by_leg[leg][1], slot_index[leg])
+        visible_pt = np.hypot(visible["px"], visible["py"])
+        visible_theta = np.arctan2(visible_pt, visible["pz"])
+        visible_phi = np.arctan2(visible["py"], visible["px"])
+        tau_px = visible["px"] + missing["px"]
+        tau_py = visible["py"] + missing["py"]
+        tau_pz = visible["pz"] + missing["pz"]
+        tau_pt = np.hypot(tau_px, tau_py)
+        tau_theta = np.arctan2(tau_pt, tau_pz)
+        tau_phi = np.arctan2(tau_py, tau_px)
+        targets[leg] = {
+            "theta": tau_theta - visible_theta,
+            "phi": (tau_phi - visible_phi + math.pi) % (2.0 * math.pi) - math.pi,
+        }
+        masks[leg] = (
+            np.isfinite(visible_theta)
+            & np.isfinite(visible_phi)
+            & np.isfinite(tau_theta)
+            & np.isfinite(tau_phi)
+            & ((tau_pt > 0) | (np.abs(tau_pz) > 0))
+        )
+    return targets, masks
+
+
 def load_method(
     files: list[Path],
     features: list[str],
@@ -118,7 +202,8 @@ def load_method(
     legs: list[str],
     weight_column: str | None,
     max_events: int | None,
-) -> tuple[dict[tuple[str, str], FeatureSample], int]:
+    target_source: str,
+) -> tuple[dict[tuple[str, str], FeatureSample], int, list[str], list[str]]:
     import pyarrow.parquet as pq
 
     feature_index = {name: index for index, name in enumerate(all_features)}
@@ -129,17 +214,51 @@ def load_method(
     prediction_chunks = {key: [] for key in target_chunks}
     weight_chunks = {key: [] for key in target_chunks}
     rows_read = 0
+    sources_used = set()
+    skipped_files = []
 
     for path in files:
         parquet_file = pq.ParquetFile(path)
         present = set(parquet_file.schema_arrow.names)
-        required = {"x_invisible", "x_invisible_mask"}
+        required = set()
         required.update(f"evenet_invisible_{leg}_valid" for leg in legs)
         required.update(
             f"evenet_invisible_{leg}_{feature}" for leg in legs for feature in features
         )
         if weight_column:
             required.add(weight_column)
+        has_tensor_target = {"x_invisible", "x_invisible_mask"}.issubset(present)
+        target_p3_fields = four_vector_target_columns(present, legs)
+        if target_source == "x_invisible" or (target_source == "auto" and has_tensor_target):
+            if not has_tensor_target:
+                raise ValueError(
+                    f"{path} has no x_invisible/x_invisible_mask columns required by target_source=x_invisible."
+                )
+            file_target_source = "x_invisible"
+            required.update(("x_invisible", "x_invisible_mask"))
+        else:
+            if target_p3_fields is None:
+                if target_source == "auto":
+                    skipped_files.append(str(path))
+                    print(
+                        f"[compare] skipping targetless parquet: {path}",
+                        flush=True,
+                    )
+                    continue
+                raise ValueError(
+                    f"{path} has neither x_invisible targets nor a complete visible + target-missing "
+                    "three-vector. Set PredictionComparison.target_source only after checking its schema."
+                )
+            unsupported = sorted(set(features) - {"theta", "phi"})
+            if unsupported:
+                raise ValueError(
+                    f"Four-vector target reconstruction supports theta/phi only, not {unsupported}."
+                )
+            file_target_source = "four_vector"
+            for visible_fields, missing_fields in target_p3_fields.values():
+                required.update(visible_fields.values())
+                required.update(missing_fields.values())
+        sources_used.add(file_target_source)
         missing = sorted(required - present)
         if missing:
             raise ValueError(f"{path} is missing required columns: {missing}")
@@ -153,13 +272,23 @@ def load_method(
                 events = events[: max_events - rows_read]
             if len(events) == 0:
                 continue
-            targets = to_numpy(events["x_invisible"])
-            target_mask = to_numpy(events["x_invisible_mask"], bool)
-            if targets.ndim != 3:
-                raise ValueError(f"x_invisible in {path} has shape {targets.shape}, expected rank 3.")
-            if targets.shape[2] < len(all_features):
-                raise ValueError(
-                    f"x_invisible in {path} has {targets.shape[2]} features, but analysis config has {len(all_features)}."
+            if file_target_source == "x_invisible":
+                tensor_targets = to_numpy(events["x_invisible"])
+                tensor_target_mask = to_numpy(events["x_invisible_mask"], bool)
+                if tensor_targets.ndim != 3:
+                    raise ValueError(
+                        f"x_invisible in {path} has shape {tensor_targets.shape}, expected rank 3."
+                    )
+                if tensor_targets.shape[2] < len(all_features):
+                    raise ValueError(
+                        f"x_invisible in {path} has {tensor_targets.shape[2]} features, "
+                        f"but analysis config has {len(all_features)}."
+                    )
+                derived_targets = None
+                derived_target_masks = None
+            else:
+                derived_targets, derived_target_masks = angular_target_values(
+                    events, target_p3_fields, legs
                 )
             base_weight = (
                 to_numpy(events[weight_column])
@@ -170,14 +299,20 @@ def load_method(
             for leg in legs:
                 slot = slot_index[leg]
                 pred_valid = to_numpy(events[f"evenet_invisible_{leg}_valid"], bool)
-                targets_by_feature = {
-                    feature: targets[:, slot, feature_index[feature]] for feature in features
-                }
+                if file_target_source == "x_invisible":
+                    targets_by_feature = {
+                        feature: tensor_targets[:, slot, feature_index[feature]]
+                        for feature in features
+                    }
+                    target_valid = tensor_target_mask[:, slot]
+                else:
+                    targets_by_feature = derived_targets[leg]
+                    target_valid = derived_target_masks[leg]
                 predictions_by_feature = {
                     feature: to_numpy(events[f"evenet_invisible_{leg}_{feature}"])
                     for feature in features
                 }
-                valid = target_mask[:, slot] & pred_valid & np.isfinite(base_weight)
+                valid = target_valid & pred_valid & np.isfinite(base_weight)
                 for feature in features:
                     valid &= np.isfinite(targets_by_feature[feature])
                     valid &= np.isfinite(predictions_by_feature[feature])
@@ -191,13 +326,17 @@ def load_method(
             break
 
     output = {}
+    if rows_read == 0:
+        raise ValueError(
+            "No evaluable MC events were found after skipping targetless parquet files."
+        )
     for key in target_chunks:
         output[key] = FeatureSample(
             target=np.concatenate(target_chunks[key]) if target_chunks[key] else np.array([]),
             prediction=np.concatenate(prediction_chunks[key]) if prediction_chunks[key] else np.array([]),
             weight=np.concatenate(weight_chunks[key]) if weight_chunks[key] else np.array([]),
         )
-    return output, rows_read
+    return output, rows_read, sorted(sources_used), skipped_files
 
 
 def weighted_mean(values: np.ndarray, weights: np.ndarray) -> float:
@@ -423,6 +562,9 @@ def main() -> None:
     max_events = max_events_cfg if args.max_events is None else args.max_events
     max_events = None if max_events in (None, 0) else int(max_events)
     weight_column = comparison.get("weight_column") or None
+    target_source = str(comparison.get("target_source", "auto"))
+    if target_source not in {"auto", "x_invisible", "four_vector"}:
+        raise ValueError("target_source must be auto, x_invisible, or four_vector.")
     bins_1d = int(comparison.get("bins_1d", 80))
     bins_2d = int(comparison.get("bins_2d", 70))
     profile_bins = int(comparison.get("profile_bins", 20))
@@ -438,11 +580,28 @@ def main() -> None:
         raise ValueError("Pass at least two distinct --method labels.")
     method_samples: dict[str, dict[tuple[str, str], FeatureSample]] = {}
     rows_by_method = {}
+    target_sources_by_method = {}
+    skipped_files_by_method = {}
     for label, path in method_paths.items():
         files = prediction_files(path)
         print(f"[compare] loading {label}: {len(files)} parquet file(s)", flush=True)
-        method_samples[label], rows_by_method[label] = load_method(
-            files, features, all_features, legs, weight_column, max_events
+        (
+            method_samples[label],
+            rows_by_method[label],
+            target_sources_by_method[label],
+            skipped_files_by_method[label],
+        ) = load_method(
+            files,
+            features,
+            all_features,
+            legs,
+            weight_column,
+            max_events,
+            target_source,
+        )
+        print(
+            f"[compare] {label}: target source(s)={target_sources_by_method[label]}",
+            flush=True,
         )
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -493,6 +652,9 @@ def main() -> None:
     summary = {
         "methods": {label: str(path) for label, path in method_paths.items()},
         "rows_read": rows_by_method,
+        "target_source_requested": target_source,
+        "target_sources_used": target_sources_by_method,
+        "skipped_targetless_files": skipped_files_by_method,
         "features": features,
         "legs": legs,
         "max_events_per_method": max_events,
