@@ -1,0 +1,124 @@
+Classification:
+  Name: process
+
+Processes:
+  Ztautau_pipi:
+    "tau-":
+      - "vis-"
+    "tau+":
+      - "vis+"
+  Ztautau_pirho:
+    "tau-":
+      - "vis-"
+    "tau+":
+      - "vis+"
+  Ztautau_rhopi:
+    "tau-":
+      - "vis-"
+    "tau+":
+      - "vis+"
+  Ztautau_pie:
+    "tau-":
+      - "vis-"
+    "tau+":
+      - "vis+"
+  Ztautau_epi:
+    "tau-":
+      - "vis-"
+    "tau+":
+      - "vis+"
+  Ztautau_rhoe:
+    "tau-":
+      - "vis-"
+    "tau+":
+      - "vis+"
+  Ztautau_erho:
+    "tau-":
+      - "vis-"
+    "tau+":
+      - "vis+"
+  Ztautau_pimu:
+    "tau-":
+      - "vis-"
+    "tau+":
+      - "vis+"
+  Ztautau_mupi:
+    "tau-":
+      - "vis-"
+    "tau+":
+        - "vis+"
+  Ztautau_rhomu:
+    "tau-":
+      - "vis-"
+    "tau+":
+      - "vis+"
+  Ztautau_murho:
+    "tau-":
+      - "vis-"
+    "tau+":
+      - "vis+"
+  Ztautau_rhorho:
+    "tau-":
+      - "vis-"
+    "tau+":
+      - "vis+"
+  Ztautau_piother:
+    "tau-":
+      - "vis-"
+    "tau+":
+      - "vis+"
+  Ztautau_ee:
+    "tau-":
+      - "vis-"
+    "tau+":
+      - "vis+"
+  Ztautau_mumu:
+    "tau-":
+      - "vis-"
+    "tau+":
+      - "vis+"
+  Ztautau_emu:
+    "tau-":
+      - "vis-"
+    "tau+":
+      - "vis+"
+  Ztautau_mue:
+    "tau-":
+      - "vis-"
+    "tau+":
+      - "vis+"
+  Ztautau_others:
+    "tau-":
+      - "vis-"
+    "tau+":
+      - "vis+"
+
+  Zll:
+    Z:
+      - l1
+      - l2
+  Zqq:
+    Z:
+      - q1
+      - q2
+
+Generations:
+  Conditions:
+#    - Event_totalChargedEnergy
+#    - Event_totalEMEnergy
+#    - Event_totalHadronicEnergy
+    - thrust_Mag
+#    - charged_E
+    - missing_px
+    - missing_py
+    - missing_pt
+    - isolation_angle
+    - thrust_x
+    - thrust_y
+    - thrust_z
+  GlobalTargets: []
+  Events:
+    - Part_energy
+    - Part_pt
+    - Part_eta
+    - Part_phi

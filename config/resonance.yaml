@@ -1,0 +1,7 @@
+TauVisibleDecay:
+  "tau-/vis-": {}
+  "tau+/vis+": {}
+
+DiObjectDecay:
+  "Z/qq": {}
+  "Z/ll": {}
