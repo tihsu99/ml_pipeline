@@ -806,6 +806,37 @@ python3 ml_pipeline/extract_response_matrix_summary.py \
   --output-prefix "$CAMPAIGN_DIR/response-matrix/evenet"
 ```
 
+### Compare Diffusion Predictions Directly
+
+Compare two or more prediction campaigns before QI reconstruction:
+
+```bash
+python3 ml_pipeline/compare_evenet_predictions.py \
+  --analysis-config ml_pipeline/config/analysis.yaml \
+  --comparison-config ml_pipeline/config/prediction_comparison.yaml \
+  --method Baseline="$BASELINE_PREDICTION_DIR" \
+  --method DGPO="$DGPO_PREDICTION_DIR" \
+  --output-dir "$CAMPAIGN_DIR/prediction-comparison"
+```
+
+The comparison uses each method's own `x_invisible` target and therefore does
+not require row alignment between methods. It writes:
+
+- normalized 1D target and prediction distributions;
+- a target-versus-prediction 2D map for every method, leg, and diffusion feature;
+- residual distributions and target-binned bias/resolution profiles;
+- target, prediction, and prediction-minus-target density maps in the configured
+  two-feature plane (by default delta-theta versus delta-phi);
+- `comparison_metrics.json` and `comparison_metrics.csv` with bias, resolution,
+  MAE, RMSE, Pearson correlation, and Jensen-Shannon divergence.
+
+These plots validate the diffusion target space. In the current analysis, the
+Invisible features are direction offsets relative to the visible tau candidate;
+they are not absolute generator-level neutrino four-vectors. Binning, feature
+selection, weights, and the per-method event cap are controlled in
+`ml_pipeline/config/prediction_comparison.yaml`. Pass `--max-events 0` to use all
+events.
+
 ## Troubleshooting
 
 ### Nested Submodule Is Missing
