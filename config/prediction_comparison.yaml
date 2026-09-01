@@ -1,0 +1,12 @@
+PredictionComparison:
+  # Null means: use all Invisible features, in their analysis.yaml order.
+  features: null
+  legs: [a, b]
+  bins_1d: 80
+  bins_2d: 70
+  profile_bins: 20
+  quantile_range: [0.005, 0.995]
+  max_events_per_method: 200000
+  weight_column: event_weight
+  joint_features: [theta, phi]
+
