@@ -41,11 +41,13 @@ from common import (
     to_numpy,
 )
 from quantum.observables_builder import build_observables, get_observable_names
+from utils.ztautau_spin import (
+    CM_ENERGY_GEV,
+    build_tau_pair_from_direction_offsets,
+)
 
 vector.register_awkward()
 
-TAU_MASS_GEV = 1.777
-CM_ENERGY_GEV = 91.2
 METHOD_CHOICES = ("target", "baseline", "evenet", "truth")
 DEFAULT_METHODS = ("target", "evenet", "baseline", "truth")
 SAMPLE_ORDER = ("data94", "Zqq", "Zll", "Ztautau")
@@ -452,20 +454,13 @@ def evenet_tau_pair(
 ) -> tuple[ak.Array, ak.Array, np.ndarray, dict[str, np.ndarray]]:
     vis_a = p4_from_fields(events, "lead_a_visible")
     vis_b = p4_from_fields(events, "lead_b_visible")
-    theta_a = vis_a.theta + events["evenet_invisible_a_theta"]
-    theta_b = vis_b.theta + events["evenet_invisible_b_theta"]
-    phi_a = (vis_a.phi + events["evenet_invisible_a_phi"] + math.pi) % (2 * math.pi) - math.pi
-    phi_b = (vis_b.phi + events["evenet_invisible_b_phi"] + math.pi) % (2 * math.pi) - math.pi
-
-    energy = CM_ENERGY_GEV / 2
-    momentum = math.sqrt(energy * energy - TAU_MASS_GEV * TAU_MASS_GEV)
-    tau_a_before = ak.zip(
-        {"pt": momentum * np.sin(theta_a), "theta": theta_a, "phi": phi_a, "m": ak.ones_like(theta_a) * TAU_MASS_GEV},
-        with_name="Momentum4D",
-    )
-    tau_b_before = ak.zip(
-        {"pt": momentum * np.sin(theta_b), "theta": theta_b, "phi": phi_b, "m": ak.ones_like(theta_b) * TAU_MASS_GEV},
-        with_name="Momentum4D",
+    tau_a_before, tau_b_before = build_tau_pair_from_direction_offsets(
+        vis_a,
+        vis_b,
+        events["evenet_invisible_a_theta"],
+        events["evenet_invisible_a_phi"],
+        events["evenet_invisible_b_theta"],
+        events["evenet_invisible_b_phi"],
     )
     if post_calibration:
         tau_a, tau_b = post_calibrate_tau_tau(tau_a_before, tau_b_before)

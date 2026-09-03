@@ -4,6 +4,11 @@ This repository contains the Ztautau EveNet workflow used to convert central
 baseline parquet files into trained EveNet models, predictions, and
 QI/unfolding-ready inputs.
 
+Measurement-aware DGPO development uses the side-by-side `EveNet-Align`
+backend and an external LEP physics plugin. The existing `evenet_dgpo/` path
+remains unchanged as a legacy compatibility implementation until production
+parity is established.
+
 The complete workflow is:
 
 1. generate the EveNet event schema
@@ -225,7 +230,7 @@ the recorded commits for reproducibility.
 | `ml_pipeline/preprocess_evenet_parquet.py` | Create training splits and normalization metadata. |
 | `ml_pipeline/predict_evenet.py` | Run classification and invisible-particle inference. |
 | `ml_pipeline/export_evenet_qi_inputs.py` | Export predictions to the central QI/unfolding layout. |
-| `ml_pipeline/scripts/train_neutrino_backend.py` | Shared launcher for pure EveNet or DGPO-EveNet neutrino training. |
+| `ml_pipeline/scripts/train_neutrino_backend.py` | Shared launcher for legacy EveNet/DGPO or the EveNet-Align backend. |
 | `ml_pipeline/scripts/run_ad_stage.py` | Stage 1 wrapper: freeze a classification backbone, export `event_token`/`object_token`, and train the latent constraint autoencoder. |
 | `ml_pipeline/scripts/run_dgpo_stage.py` | Stage 2 wrapper: launch DGPO/diffusion post-training on the AD-augmented parquet. |
 | `ml_pipeline/evenet_dgpo/` | Vendored EveNet + DGPO stack, including RL and latent-SWD constraint tooling. |
@@ -632,6 +637,19 @@ python3 ml_pipeline/scripts/train_neutrino_backend.py \
   --base-config ml_pipeline/config/train_pretrain.yaml \
   -- --ray_dir "$CAMPAIGN_DIR/ray/dgpo-diffusion"
 ```
+
+Launch the bounded EveNet-Align measurement-DGPO debug configuration with:
+
+```bash
+python3 ml_pipeline/scripts/train_neutrino_backend.py \
+  --backend evenet-align \
+  --base-config ml_pipeline/config/train_pretrain.yaml \
+  --overlay-config ml_pipeline/config/measurement_dgpo_cdiag_overlay.yaml \
+  -- --ray_dir ./outputs/measurement_dgpo_cdiag_debug/ray
+```
+
+This selects `measurement_dgpo` and loads the external LEP Cdiag physics
+plugin. The legacy `evenet_dgpo/` implementation remains available unchanged.
 
 The launcher writes a temporary merged runtime YAML, sets `PYTHONPATH` so the
 vendored `evenet_dgpo` package is importable, and then dispatches to either

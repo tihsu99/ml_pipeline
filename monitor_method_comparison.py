@@ -24,6 +24,7 @@ from common import build_classification_lookup, channel_latex_label, process_lat
 from evaluation_config import post_calibration_enabled
 from plot_style import plot_data_mc_histogram_from_counts, plot_truth_prediction_bundle
 from quantum.observables_builder import build_observables, get_observable_names
+from utils.ztautau_spin import build_tau_pair_from_direction_offsets
 
 DEFAULT_SAMPLE_LIMIT = 200_000
 QUANTUM_RANGES = {
@@ -623,11 +624,6 @@ def build_target_observables(events: ak.Array) -> dict[str, np.ndarray] | None:
     return {name: np.asarray(values, dtype=np.float64) for name, values in observables.items()}
 
 
-TAU_MASS = 1.777  # GeV
-CM_ENERGY = 91.2 # GeV
-
-
-
 def build_evenet_observables(
     events: ak.Array,
     post_calibration: bool,
@@ -662,34 +658,13 @@ def build_evenet_observables(
     delta_visible_b_theta = events["evenet_invisible_b_theta"]
     delta_visible_b_phi = events["evenet_invisible_b_phi"]
 
-    tau_a_theta = visible_a.theta + delta_visible_a_theta
-    tau_b_theta = visible_b.theta + delta_visible_b_theta
-    tau_a_phi = (visible_a.phi + delta_visible_a_phi + math.pi) % (2 * math.pi) - math.pi
-    tau_b_phi = (visible_b.phi + delta_visible_b_phi + math.pi) % (2 * math.pi) - math.pi
-
-    energy = CM_ENERGY / 2
-    mass = TAU_MASS
-
-    p = np.sqrt( energy ** 2 - mass ** 2)
-
-    tau_a = ak.zip(
-        {
-            "pt": p * np.sin(tau_a_theta),
-            "theta": tau_a_theta,
-            "phi": tau_a_phi,
-            "m": ak.ones_like(tau_a_theta) * mass,
-        },
-        with_name="Momentum4D",
-    )
-
-    tau_b = ak.zip(
-        {
-            "pt": p * np.sin(tau_b_theta),
-            "theta": tau_b_theta,
-            "phi": tau_b_phi,
-            "m": ak.ones_like(tau_b_theta) * mass,
-        },
-        with_name="Momentum4D",
+    tau_a, tau_b = build_tau_pair_from_direction_offsets(
+        visible_a,
+        visible_b,
+        delta_visible_a_theta,
+        delta_visible_a_phi,
+        delta_visible_b_theta,
+        delta_visible_b_phi,
     )
 
 

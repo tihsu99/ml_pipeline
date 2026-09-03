@@ -1,0 +1,4 @@
+[submodule "EveNet-Align"]
+	path = EveNet-Align
+	url = git@github.com:UW-EPE-ML/EveNet-Align.git
+	branch = RL-dev
