@@ -52,7 +52,7 @@ options:
         batch_size: 2048
         input_mode: target_separated
       policy:
-        local_epochs: 2
+        local_epochs: 1
         timesteps: 4
         event_microbatch_size: 128
         reward_scale: 1.0
@@ -61,7 +61,7 @@ options:
         score_pool_events: "50%"
         candidates: 1
         max_batches: null
-        every_n_epochs: 2
+        every_n_epochs: 1
         min_relative_improvement: 0.002
         split_noise_multiplier: 2.0
       diagnostics:
