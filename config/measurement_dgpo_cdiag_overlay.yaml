@@ -35,7 +35,7 @@ options:
     strategy:
       default: ../EveNet-Align/share/strategies/measurement_dgpo.yaml
       name: measurement_dgpo
-      steps_per_epoch: 2
+#      steps_per_epoch: 2
       plugin:
         class_path: measurement_plugins.evenet_ztautau:ZTauTauSpinMeasurementPlugin
         targets: [Cnn, Crr, Ckk]
