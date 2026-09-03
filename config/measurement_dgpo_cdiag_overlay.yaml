@@ -1,0 +1,70 @@
+# First bounded Cdiag integration/debug overlay. Production defaults live in
+# EveNet-Align/share/strategies/measurement_dgpo.yaml.
+logger:
+  wandb:
+    enabled: true
+    project: "DGPO-Measurement"
+    run_name: &logger_name "LEP-TauNu-Pretrain"
+    tags: [ "EveNet", "LEP" ]
+    entity: ytchou97-university-of-washington
+    simplified: false
+  local:
+    save_dir: /pscratch/sd/t/tihsu/tmp/
+    name: measurement-dgpo-cdiag-debug
+    version: v1
+
+platform:
+  data_parquet_dir: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis/evenet-input/train-diffusion
+  data_parquet_val_dir: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis/evenet-input/val-diffusion
+  number_of_workers: 1
+  resources_per_worker:
+    CPU: 4
+    GPU: 1
+  batch_size: 32
+  prefetch_batches: 1
+  use_gpu: true
+
+options:
+  default: ../EveNet-Align/share/options/options.yaml
+  Training:
+    epochs: 2
+    total_epochs: 2
+    pretrain_model_load_path: '/global/cfs/cdirs/m5019/yiren/Ztautau/shared_checkpoints/diffusion_5pct_seed42_best_val/epoch=224_train=0.1291_val=0.1279.ckpt'
+    model_checkpoint_save_path: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis/checkpoint-pretrain-DGPO-measurement
+    model_checkpoint_save_top_k: 1
+    strategy:
+      default: ../EveNet-Align/share/strategies/measurement_dgpo.yaml
+      name: measurement_dgpo
+      steps_per_epoch: 2
+      plugin:
+        class_path: measurement_plugins.evenet_ztautau:ZTauTauSpinMeasurementPlugin
+        targets: [Cnn, Crr, Ckk]
+        options:
+          candidate_feature_names: [theta, phi]
+      rollout:
+        candidates: 2
+        ddim_steps: 4
+      score:
+        pool_events: 256
+        epochs: 2
+        batch_size: 64
+        input_mode: target_separated
+      policy:
+        local_epochs: 2
+        timesteps: 1
+        event_microbatch_size: 16
+        reward_scale: 1.0
+        reference_trust: 0.0
+      validation:
+        score_pool_events: 128
+        candidates: 1
+        max_batches: 2
+        every_n_epochs: 2
+        min_relative_improvement: 0.002
+        split_noise_multiplier: 2.0
+  Dataset:
+    dataset_limit: 0.01
+    dataset_limit_apply_to_val_set: true
+
+network:
+  default: ../EveNet-Align/share/network/network-20M.yaml
