@@ -45,7 +45,7 @@ options:
         candidates: 8
         ddim_steps: 20
       score:
-        pool_events: "10%"
+        pool_events: "50%"
         hidden_dim: 64
         hidden_layers: 2
         epochs: 100
