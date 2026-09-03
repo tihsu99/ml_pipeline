@@ -1,0 +1,9 @@
+# Full-state measurement-DGPO overlay. Machine and dataset settings stay in the base YAML.
+options:
+  Training:
+    strategy:
+      default: ../EveNet-Align/share/strategies/measurement_dgpo_sdm.yaml
+      name: measurement_dgpo
+      objective:
+        mode: sdm_frobenius
+      selection_metric: val/J_sdm

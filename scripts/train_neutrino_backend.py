@@ -23,6 +23,7 @@ EVENET_DGPO_ROOT = REPO_ROOT / "evenet_dgpo"
 EVENET_ALIGN_ROOT = REPO_ROOT / "EveNet-Align"
 DEFAULT_OVERLAY = REPO_ROOT / "config" / "dgpo_ztautau_overlay.yaml"
 MEASUREMENT_OVERLAY = REPO_ROOT / "config" / "measurement_dgpo_cdiag_overlay.yaml"
+MEASUREMENT_SDM_OVERLAY = REPO_ROOT / "config" / "measurement_dgpo_sdm_overlay.yaml"
 
 
 def read_yaml(path: Path) -> dict[str, Any]:
@@ -92,8 +93,16 @@ def command_for_backend(backend: str, runtime_config: Path) -> list[str]:
     raise ValueError(f"Unsupported backend={backend!r}")
 
 
-def default_overlay_for_backend(backend: str) -> Path:
-    return MEASUREMENT_OVERLAY if backend == "evenet-align" else DEFAULT_OVERLAY
+def default_overlay_for_backend(
+    backend: str, measurement_objective: str = "cdiag_conditional",
+) -> Path:
+    if backend != "evenet-align":
+        return DEFAULT_OVERLAY
+    return (
+        MEASUREMENT_SDM_OVERLAY
+        if measurement_objective == "sdm_frobenius"
+        else MEASUREMENT_OVERLAY
+    )
 
 
 def environment_for_backend(backend: str, base: dict[str, str] | None = None) -> dict[str, str]:
@@ -121,6 +130,12 @@ def main() -> None:
         choices=("pure-evenet", "dgpo-evenet", "evenet-align"),
         required=True,
     )
+    parser.add_argument(
+        "--measurement-objective",
+        choices=("cdiag_conditional", "sdm_frobenius"),
+        default="cdiag_conditional",
+        help="Default EveNet-Align measurement overlay; an explicit --overlay-config wins.",
+    )
     parser.add_argument("--base-config", type=Path, required=True, help="Base training YAML from the current EveNet workflow.")
     parser.add_argument(
         "--overlay-config",
@@ -145,7 +160,10 @@ def main() -> None:
         overlay_config=(
             None
             if args.no_overlay
-            else (args.overlay_config or default_overlay_for_backend(args.backend)).resolve()
+            else (
+                args.overlay_config
+                or default_overlay_for_backend(args.backend, args.measurement_objective)
+            ).resolve()
         ),
         backend=args.backend,
     )

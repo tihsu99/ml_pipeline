@@ -35,6 +35,9 @@ options:
     strategy:
       default: ../EveNet-Align/share/strategies/measurement_dgpo.yaml
       name: measurement_dgpo
+      selection_metric: val/J_cond
+      objective:
+        mode: cdiag_conditional
 #      steps_per_epoch: 2
       plugin:
         class_path: measurement_plugins.evenet_ztautau:ZTauTauSpinMeasurementPlugin
@@ -67,6 +70,11 @@ options:
       diagnostics:
         replacement_check_events: 8
         full_fisher: true
+        physics_plots: true
+        physics_plot_events: 20000
+        binned_measurement: true
+        binned_measurement_events: null
+        binned_measurement_accepted_only: false
   Dataset:
     dataset_limit: 0.05
     dataset_limit_apply_to_val_set: true

@@ -726,6 +726,20 @@ python3 ml_pipeline/scripts/train_neutrino_backend.py \
 This selects `measurement_dgpo` and loads the external LEP Cdiag physics
 plugin. The legacy `evenet_dgpo/` implementation remains available unchanged.
 
+Select the explicit full spin-density-matrix objective with the config-driven
+shortcut:
+
+```bash
+python3 ml_pipeline/scripts/train_neutrino_backend.py \
+  --backend evenet-align \
+  --measurement-objective sdm_frobenius \
+  --base-config ml_pipeline/config/train_pretrain.yaml \
+  -- --ray_dir ./outputs/measurement_dgpo_sdm_debug/ray
+```
+
+This chooses `measurement_dgpo_sdm_overlay.yaml`; an explicit
+`--overlay-config` always takes precedence.
+
 The launcher writes a temporary merged runtime YAML, sets `PYTHONPATH` so the
 vendored `evenet_dgpo` package is importable, and then dispatches to either
 `evenet_dgpo/evenet/train.py` or
