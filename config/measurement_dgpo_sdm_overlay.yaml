@@ -53,7 +53,7 @@ options:
         candidates: 4
         ddim_steps: 10
       score:
-        pool_events: "10%"
+        pool_events: "50%"
         hidden_dim: 64
         hidden_layers: 2
         epochs: 20
@@ -67,11 +67,12 @@ options:
         reference_trust: 0.0
       validation:
         score_pool_events: "50%"
-        candidates: 1
+        candidates: 8
         max_batches: null
         every_n_epochs: 1
         min_relative_improvement: 0.002
         split_noise_multiplier: 2.0
+        require_score_parity: true
       diagnostics:
         replacement_check_events: 8
         full_fisher: true

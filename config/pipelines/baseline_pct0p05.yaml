@@ -1,0 +1,90 @@
+pipeline:
+  name: ztautau_baseline_0p05training_data
+  output_dir: generated/ztautau_external_checkpoint
+
+configs:
+  train: config/train_pretrain.yaml
+  analysis: config/analysis.yaml
+  evenet_schema: config/evenet_schema.yaml
+
+checkpoints:
+  classification:
+    source: external
+    path: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis/checkpoint-pretrain-cls/last.ckpt
+  diffusion:
+    source: external
+    path: "/global/cfs/cdirs/m5019/yiren/Ztautau/shared_checkpoints/diffusion_5pct_seed42_best_val/epoch=224_train=0.1291_val=0.1279.ckpt"
+train:
+  enabled: false
+
+predict:
+  enabled: true
+  options:
+    normalization_file: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis/evenet-input/normalization.pt
+    converted_parquet:
+      - /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis/evenet-input/test
+    shape_metadata: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis/evenet-input/shape_metadata.json
+    output_dir: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis_method/baseline/prediction
+    converted_split_fraction: 0.2
+    batch_size: 8192
+    num_steps: 20
+  resources:
+    nodes: 4
+    gpus_per_node: 4
+    cpus_per_node: 32
+    time: "04:00:00"
+    account: m5019
+    qos: regular
+    constraint: gpu
+  shifter:
+    enabled: true
+    image: registry.nersc.gov/m2616/avencast/evenet:1.3
+
+eval:
+  enabled: true
+  entrypoint: export_evenet_qi_inputs.py
+  args:
+    - --analysis-config
+    - config/analysis.yaml
+    - --prediction-parquet
+    - /path/to/external-checkpoint-run/prediction/*__evenet_pred.parquet
+    - --base-dir
+    - /path/to/external-checkpoint-run/qi
+    - --methods
+    - evenet
+  resources:
+    nodes: 1
+    gpus_per_node: 0
+    cpus_per_node: 4
+    time: "02:00:00"
+    account: m5019
+    qos: regular
+  shifter:
+    enabled: false
+
+fit:
+  enabled: true
+  commands:
+    - entrypoint: bin/tree_ana
+      working_directory: ..
+      python: true
+      setup_scripts:
+        - setup.sh
+      args:
+        - -c
+        - /path/to/external-checkpoint-run/qi/evenet/config_evenet.yaml
+    - entrypoint: extract_qi_final_measurements.py
+      args:
+        - --method
+        - External:/path/to/external-checkpoint-run/qi/evenet/run/QI_analysis/results.txt
+        - --output-prefix
+        - /path/to/external-checkpoint-run/qi-results/external
+  resources:
+    nodes: 1
+    gpus_per_node: 0
+    cpus_per_node: 32
+    time: "02:00:00"
+    account: m5019
+    qos: regular
+  shifter:
+    enabled: false
