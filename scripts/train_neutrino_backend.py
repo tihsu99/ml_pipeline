@@ -82,15 +82,28 @@ def build_runtime_config(
     return runtime_path
 
 
-def command_for_backend(backend: str, runtime_config: Path) -> list[str]:
+def command_for_backend(
+    backend: str,
+    runtime_config: Path,
+    *,
+    ray_dir: Path | None = None,
+) -> list[str]:
     python_exe = sys.executable
     if backend == "pure-evenet":
-        return [python_exe, str(EVENET_DGPO_ROOT / "evenet" / "train.py"), str(runtime_config)]
-    if backend == "dgpo-evenet":
-        return [python_exe, str(EVENET_DGPO_ROOT / "RL" / "DGPO_neutrino" / "dgpo_trainer.py"), str(runtime_config)]
-    if backend == "evenet-align":
-        return [python_exe, str(EVENET_ALIGN_ROOT / "scripts" / "train.py"), str(runtime_config)]
-    raise ValueError(f"Unsupported backend={backend!r}")
+        entrypoint = EVENET_DGPO_ROOT / "evenet" / "train.py"
+        ray_option = "--ray_dir"
+    elif backend == "dgpo-evenet":
+        entrypoint = EVENET_DGPO_ROOT / "RL" / "DGPO_neutrino" / "dgpo_trainer.py"
+        ray_option = "--ray-dir"
+    elif backend == "evenet-align":
+        entrypoint = EVENET_ALIGN_ROOT / "scripts" / "train.py"
+        ray_option = "--ray_dir"
+    else:
+        raise ValueError(f"Unsupported backend={backend!r}")
+    command = [python_exe, str(entrypoint), str(runtime_config)]
+    if ray_dir is not None:
+        command.extend((ray_option, str(ray_dir.expanduser())))
+    return command
 
 
 def default_overlay_for_backend(
@@ -149,6 +162,14 @@ def main() -> None:
         help="Do not apply any overlay; run the base config exactly as provided.",
     )
     parser.add_argument(
+        "--ray-dir",
+        "--ray_dir",
+        dest="ray_dir",
+        type=Path,
+        default=None,
+        help="Ray results directory, forwarded with the spelling required by the backend.",
+    )
+    parser.add_argument(
         "extra_args",
         nargs=argparse.REMAINDER,
         help="Arguments passed through to the underlying train entrypoint.",
@@ -168,7 +189,7 @@ def main() -> None:
         backend=args.backend,
     )
     env = environment_for_backend(args.backend)
-    command = command_for_backend(args.backend, runtime_config)
+    command = command_for_backend(args.backend, runtime_config, ray_dir=args.ray_dir)
     if args.extra_args:
         passthrough = list(args.extra_args)
         if passthrough and passthrough[0] == "--":

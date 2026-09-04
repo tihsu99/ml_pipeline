@@ -1,7 +1,7 @@
 # Full-state measurement-DGPO overlay. Machine and dataset settings stay in the base YAML.
 
-# First bounded Cdiag integration/debug overlay. Production defaults live in
-# EveNet-Align/share/strategies/measurement_dgpo.yaml.
+# Bounded full-SDM integration/debug overlay. Production defaults live in
+# EveNet-Align/share/strategies/measurement_dgpo_sdm.yaml.
 logger:
   wandb:
     enabled: true
@@ -46,7 +46,6 @@ options:
         fail_on_insufficient_score_coverage: true
       plugin:
         class_path: measurement_plugins.evenet_ztautau:ZTauTauSpinMeasurementPlugin
-        targets: [Cnn, Crr, Ckk]
         options:
           candidate_feature_names: [theta, phi]
       rollout:
@@ -58,7 +57,6 @@ options:
         hidden_layers: 2
         epochs: 100
         batch_size: 2048
-        input_mode: target_separated
       policy:
         local_epochs: 1
         timesteps: 4
@@ -86,6 +84,4 @@ options:
 
 network:
   default: ../EveNet-Align/share/network/network-20M.yaml
-
-
 

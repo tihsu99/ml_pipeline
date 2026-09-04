@@ -26,6 +26,13 @@ class MeasurementObjectiveShortcutTests(unittest.TestCase):
         ]["Training"]["strategy"]
         self.assertEqual(strategy["objective"]["mode"], "sdm_frobenius")
         self.assertEqual(strategy["selection_metric"], "val/J_sdm")
+        self.assertNotIn("targets", strategy["plugin"])
+        self.assertNotIn("input_mode", strategy["score"])
+
+        default_path = (MEASUREMENT_SDM_OVERLAY.parent / strategy["default"]).resolve()
+        defaults = yaml.safe_load(default_path.read_text())
+        self.assertEqual(len(defaults["plugin"]["targets"]), 15)
+        self.assertEqual(defaults["score"]["input_mode"], "joint")
 
 
 if __name__ == "__main__":

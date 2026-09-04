@@ -710,7 +710,7 @@ Pass extra trainer arguments after `--`, for example:
 python3 ml_pipeline/scripts/train_neutrino_backend.py \
   --backend dgpo-evenet \
   --base-config ml_pipeline/config/train_pretrain.yaml \
-  -- --ray_dir "$CAMPAIGN_DIR/ray/dgpo-diffusion"
+  --ray-dir "$CAMPAIGN_DIR/ray/dgpo-diffusion"
 ```
 
 Launch the bounded EveNet-Align measurement-DGPO debug configuration with:
@@ -720,7 +720,7 @@ python3 ml_pipeline/scripts/train_neutrino_backend.py \
   --backend evenet-align \
   --base-config ml_pipeline/config/train_pretrain.yaml \
   --overlay-config ml_pipeline/config/measurement_dgpo_cdiag_overlay.yaml \
-  -- --ray_dir ./outputs/measurement_dgpo_cdiag_debug/ray
+  --ray-dir ./outputs/measurement_dgpo_cdiag_debug/ray
 ```
 
 This selects `measurement_dgpo` and loads the external LEP Cdiag physics
@@ -734,11 +734,15 @@ python3 ml_pipeline/scripts/train_neutrino_backend.py \
   --backend evenet-align \
   --measurement-objective sdm_frobenius \
   --base-config ml_pipeline/config/train_pretrain.yaml \
-  -- --ray_dir ./outputs/measurement_dgpo_sdm_debug/ray
+  --ray-dir ./outputs/measurement_dgpo_sdm_debug/ray
 ```
 
 This chooses `measurement_dgpo_sdm_overlay.yaml`; an explicit
 `--overlay-config` always takes precedence.
+
+The wrapper accepts both `--ray-dir` and `--ray_dir`, then forwards the spelling
+required by the selected backend. Arguments after `--` remain a raw pass-through
+escape hatch for other trainer options.
 
 The launcher writes a temporary merged runtime YAML, sets `PYTHONPATH` so the
 vendored `evenet_dgpo` package is importable, and then dispatches to either
