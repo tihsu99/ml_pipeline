@@ -22,7 +22,7 @@ platform:
   resources_per_worker:
     CPU: 4
     GPU: 1
-  batch_size: 2048
+  batch_size: 4096
   prefetch_batches: 1
   use_gpu: true
 
@@ -52,16 +52,17 @@ options:
         candidates: 8
         ddim_steps: 20
       score:
-        pool_events: "50%"
+        pool_events: "10%"
         hidden_dim: 64
         hidden_layers: 2
-        epochs: 100
+        epochs: 20
         batch_size: 2048
       policy:
         local_epochs: 1
-        timesteps: 4
-        event_microbatch_size: 128
+        timesteps: 2
+        event_microbatch_size: 2048
         reward_scale: 1.0
+        scale_reward_by_reference_events: true
         reference_trust: 0.0
       validation:
         score_pool_events: "50%"
@@ -74,14 +75,13 @@ options:
         replacement_check_events: 8
         full_fisher: true
         physics_plots: true
-        physics_plot_events: 20000
+        physics_plot_events: 10000
         binned_measurement: true
         binned_measurement_events: null
-        binned_measurement_accepted_only: false
+        binned_measurement_accepted_only: true
   Dataset:
     dataset_limit: 0.05
     dataset_limit_apply_to_val_set: true
 
 network:
   default: ../EveNet-Align/share/network/network-20M.yaml
-
