@@ -36,10 +36,10 @@ options:
     eval_metrics_every_n_epochs: 1
     apply_event_weight: false
 
-    learning_rate: &lr 0.002
-    learning_rate_body: &lr_body 0.0002
-    learning_rate_classification: &lr_classification 0.002
-    learning_rate_median: &lr_median 0.002
+    learning_rate: &lr 0.0002
+    learning_rate_body: &lr_body 0.00002
+    learning_rate_classification: &lr_classification 0.0002
+    learning_rate_median: &lr_median 0.0002
 
     Components:
       InvisibleInputProjector:
