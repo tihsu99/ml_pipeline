@@ -19,80 +19,46 @@ The complete workflow is:
 6. export predictions to the central QI layout
 7. run the central QI and forward-folding processors
 
-## Config-Driven Launch Shortcuts
+## Config-Driven Run Command
 
-The shortcut generator is an additive launch layer around the existing
-commands. It writes `sbatch` files and a resolved YAML; it does not replace any
-training, prediction, export, or fitting implementation.
+`run.sh` is the single pipeline entry point. It reads one YAML and executes the
+enabled `train`, `predict`, `eval`, and `fit` commands in that order. It does
+not generate or submit `sbatch` files, and prediction is one invocation of the
+existing `predict_evenet.py`, matching the commands documented below.
 
-Start from one of the editable examples:
-
-- `config/pipelines/example.yaml`: multi-node DGPO train and sharded prediction
-- `config/pipelines/external_checkpoint.yaml`: prediction, evaluation, and fit
-  with training disabled and collaborator checkpoints
-
-Generate scripts without submitting anything:
+Print every resolved command without running it:
 
 ```bash
-./train.sh config/pipelines/example.yaml --dry-run
-./predict.sh config/pipelines/example.yaml --dry-run
-./eval.sh config/pipelines/example.yaml --dry-run
-./fit.sh config/pipelines/example.yaml --dry-run
+./run.sh config/pipelines/baseline_pct0p05.yaml --dry-run
 ```
 
-Omitting both mode flags also means generate only. Add `--submit` to generate
-and pass every generated script for that stage to `sbatch`:
+Run the enabled stages sequentially and stream their output to the terminal:
 
 ```bash
-./predict.sh config/pipelines/example.yaml --submit
+./run.sh config/pipelines/baseline_pct0p05.yaml
 ```
 
-Paths under `configs`, `checkpoints`, and the known prediction path options are
-resolved relative to this repository. Checkpoint files do not need to exist at
-generation time, so configs can be prepared away from the production file
-system. Generated runtime files are ignored by Git and follow this layout:
+Each stage has an optional YAML switch. The default is direct execution;
+enable `srun` only where a Slurm allocation is needed:
 
-```text
-generated/<pipeline-name>/
-├── resolved_config.yaml
-├── train/train.sbatch
-├── predict/predict_000.sbatch
-├── eval/eval.sbatch
-└── fit/fit.sbatch
+```yaml
+predict:
+  enabled: true
+  srun: true
+
+eval:
+  enabled: true
+  srun: false
+
+fit:
+  enabled: true
+  srun: false
 ```
 
-`predict.resources.nodes` is the number of independent prediction shards; each
-job requests one node and receives `gpus_per_node` through the existing
-`--num-gpus` option. Multi-shard commands also receive
-`--task-num-shards`, `--task-shard-index`, and `--skip-merge`. After all shards
-finish, use the existing `predict_evenet.py --merge-only` command once before
-evaluation. Job dependencies and merge orchestration intentionally remain
-outside this lightweight generator.
-
-Evaluation and fit are configured as literal existing entrypoints plus argument
-lists. A command may set `working_directory`, `python`, and `setup_scripts`.
-The examples use this to source the parent `lep_tree_ana/setup.sh` and run the
-real parent `bin/tree_ana`; no central-analysis logic is copied into this
-repository.
-
-An abbreviated dry run looks like:
-
-```text
-Pipeline: ztautau_example
-Mode: dry-run
-Resolved config: .../generated/ztautau_example/resolved_config.yaml
-
-[predict]
-nodes: 4
-gpus/node: 4
-shards: 4
-shifter: enabled
-.../predict/predict_000.sbatch
-command: python3 .../predict_evenet.py ... --num-gpus 4 --task-num-shards 4 --task-shard-index 0
-.../predict/predict_001.sbatch
-.../predict/predict_002.sbatch
-.../predict/predict_003.sbatch
-```
+Paths under `configs`, `checkpoints`, and known prediction options are resolved
+relative to this repository. A command may also set `working_directory`,
+`python`, and `setup_scripts`; this is used to source the parent
+`lep_tree_ana/setup.sh` before the central QI command.
 
 ## Evaluate Checkpoint A and B
 

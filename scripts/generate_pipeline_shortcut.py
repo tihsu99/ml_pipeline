@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import os
 import re
 import shlex
 import subprocess
@@ -135,6 +136,10 @@ def _validate_stage(
     config: dict[str, Any],
     repo_root: Path,
 ) -> None:
+    use_srun = stage_data.get("srun", False)
+    if not isinstance(use_srun, bool):
+        raise ConfigError(f"{stage}.srun must be true or false.")
+    stage_data["srun"] = use_srun
     resources = _mapping(stage_data.get("resources"), f"{stage}.resources")
     for key, minimum in (("nodes", 1), ("gpus_per_node", 0), ("cpus_per_node", 1)):
         value = resources.get(key)
@@ -246,10 +251,6 @@ def _validate_predict(
                 options[key] = _resolve_path(
                     value, base=repo_root, label=f"predict.options.{key}"
                 )
-    if stage_data["resources"]["nodes"] > 1:
-        options["skip_merge"] = True
-
-
 def _command_specs(stage: str, stage_data: dict[str, Any]) -> list[dict[str, Any]]:
     if "commands" in stage_data:
         commands = _list(stage_data["commands"], f"{stage}.commands")
@@ -321,10 +322,9 @@ def train_command(config: dict[str, Any]) -> list[str]:
     return command
 
 
-def predict_command(config: dict[str, Any], shard_index: int) -> list[str]:
+def predict_command(config: dict[str, Any], shard_index: int | None = None) -> list[str]:
     stage = config["predict"]
     resources = stage["resources"]
-    shards = resources["nodes"]
     command = [
         config["python"],
         str(Path(config["_resolved"]["repo_root"]) / "predict_evenet.py"),
@@ -341,11 +341,12 @@ def predict_command(config: dict[str, Any], shard_index: int) -> list[str]:
         *_cli_options(stage["options"]),
         "--num-gpus",
         str(resources["gpus_per_node"]),
-        "--task-num-shards",
-        str(shards),
-        "--task-shard-index",
-        str(shard_index),
     ]
+    if shard_index is not None:
+        command.extend((
+            "--task-num-shards", str(resources["nodes"]),
+            "--task-shard-index", str(shard_index),
+        ))
     return command
 
 
@@ -472,6 +473,82 @@ def _command_stage_lines(config: dict[str, Any], stage: str) -> list[str]:
     return lines
 
 
+def interactive_commands(config: dict[str, Any], stage: str) -> list[dict[str, Any]]:
+    """Build direct commands with an optional per-stage srun prefix."""
+    resources = config[stage]["resources"]
+    prefix: list[str] = []
+    if config[stage]["srun"]:
+        prefix = [
+            "srun",
+            f"--nodes={resources['nodes']}",
+            "--ntasks=1",
+            f"--cpus-per-task={resources['cpus_per_node']}",
+            f"--time={resources['time']}",
+        ]
+        if resources["gpus_per_node"]:
+            prefix.append(f"--gpus-per-task={resources['gpus_per_node']}")
+        for key in ("account", "qos", "constraint", "partition"):
+            if key in resources:
+                prefix.append(f"--{key}={resources[key]}")
+
+    rendered = []
+    shifter = config[stage]["shifter"]
+    repo_root = Path(config["_resolved"]["repo_root"])
+    if stage == "train":
+        specs = [(repo_root, [], train_command(config))]
+    elif stage == "predict":
+        specs = [(repo_root, [], predict_command(config))]
+    else:
+        specs = configured_commands(config, stage)
+    for working_directory, setup_scripts, command in specs:
+        launch = shifter_command(command, shifter)
+        if setup_scripts:
+            shell = " && ".join([
+                *(f"source {shlex.quote(str(path))}" for path in setup_scripts),
+                f"exec {shlex.join(launch)}",
+            ])
+            launch = ["bash", "-lc", shell]
+        rendered.append({
+            "stage": stage,
+            "cwd": working_directory,
+            "command": [*prefix, *launch],
+        })
+    return rendered
+
+
+def print_interactive_summary(
+    config: dict[str, Any], stages: Iterable[str], commands: list[dict[str, Any]], *, dry_run: bool,
+) -> None:
+    print(f"Pipeline: {config['pipeline']['name']}")
+    print(f"Mode: {'dry-run' if dry_run else 'run'}")
+    for stage in stages:
+        print(f"\n[{stage}]")
+        if not config[stage]["enabled"]:
+            print("disabled")
+            continue
+        for item in commands:
+            if item["stage"] == stage:
+                print(f"cwd: {item['cwd']}")
+                print(f"command: {shlex.join(item['command'])}")
+
+
+def run_interactive_commands(config: dict[str, Any], commands: Iterable[dict[str, Any]]) -> None:
+    for item in commands:
+        stage = item["stage"]
+        environment = os.environ.copy()
+        environment.update({
+            key: str(value) for key, value in config[stage]["environment"].items()
+        })
+        missing = [
+            key for key in config[stage]["required_env"] if not environment.get(key)
+        ]
+        if missing:
+            raise ConfigError(f"Set required environment variable(s): {', '.join(missing)}")
+        subprocess.run(
+            item["command"], cwd=item["cwd"], env=environment, check=True,
+        )
+
+
 def render_sbatch(
     config: dict[str, Any], stage: str, script_path: Path, *, shard_index: int | None = None
 ) -> tuple[str, list[str]]:
@@ -585,13 +662,31 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--config", type=Path, required=True, help="Pipeline shortcut YAML.")
     parser.add_argument("--stage", choices=(*STAGES, "all"), required=True)
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--dry-run", action="store_true", help="Generate and print scripts without submission.")
+    mode.add_argument("--dry-run", action="store_true", help="Print commands without running or submitting them.")
     mode.add_argument("--submit", action="store_true", help="Generate scripts and submit each one with sbatch.")
+    parser.add_argument(
+        "--interactive", action="store_true",
+        help="Run the selected command directly with srun instead of generating sbatch files.",
+    )
     args = parser.parse_args(argv)
 
     try:
         config = read_pipeline_config(args.config)
         stages = list(STAGES) if args.stage == "all" else [args.stage]
+        if args.interactive:
+            if args.submit:
+                raise ConfigError("--interactive cannot be combined with --submit.")
+            commands = [
+                item
+                for stage in stages if config[stage]["enabled"]
+                for item in interactive_commands(config, stage)
+            ]
+            print_interactive_summary(
+                config, stages, commands, dry_run=args.dry_run,
+            )
+            if not args.dry_run:
+                run_interactive_commands(config, commands)
+            return
         generated = generate_scripts(config, stages)
         selected_mode = "dry-run" if args.dry_run else "submit" if args.submit else "generate"
         print_summary(config, stages, generated, mode=selected_mode)

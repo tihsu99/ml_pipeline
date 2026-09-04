@@ -1,6 +1,6 @@
 pipeline:
   name: ztautau_baseline_0p05training_data
-  output_dir: generated/ztautau_external_checkpoint
+  output_dir: generated/ztautau_baseline_0p05training_data
 
 configs:
   train: config/train_pretrain.yaml
@@ -16,9 +16,11 @@ checkpoints:
     path: "/global/cfs/cdirs/m5019/yiren/Ztautau/shared_checkpoints/diffusion_5pct_seed42_best_val/epoch=224_train=0.1291_val=0.1279.ckpt"
 train:
   enabled: false
+  srun: true
 
 predict:
   enabled: true
+  srun: true
   options:
     normalization_file: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis/evenet-input/normalization.pt
     converted_parquet:
@@ -29,7 +31,7 @@ predict:
     batch_size: 8192
     num_steps: 20
   resources:
-    nodes: 4
+    nodes: 1
     gpus_per_node: 4
     cpus_per_node: 32
     time: "04:00:00"
@@ -42,14 +44,15 @@ predict:
 
 eval:
   enabled: true
+  srun: false
   entrypoint: export_evenet_qi_inputs.py
   args:
     - --analysis-config
     - config/analysis.yaml
     - --prediction-parquet
-    - /path/to/external-checkpoint-run/prediction/*__evenet_pred.parquet
+    - /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis_method/baseline/prediction/*__evenet_pred.parquet
     - --base-dir
-    - /path/to/external-checkpoint-run/qi
+    - /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis_method/baseline/qi
     - --methods
     - evenet
   resources:
@@ -64,6 +67,7 @@ eval:
 
 fit:
   enabled: true
+  srun: false
   commands:
     - entrypoint: bin/tree_ana
       working_directory: ..
@@ -71,14 +75,14 @@ fit:
       setup_scripts:
         - setup.sh
       args:
-        - -c
-        - /path/to/external-checkpoint-run/qi/evenet/config_evenet.yaml
+        - --config-yaml
+        - /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis_method/baseline/qi/evenet/config_evenet.yaml
     - entrypoint: extract_qi_final_measurements.py
       args:
         - --method
-        - External:/path/to/external-checkpoint-run/qi/evenet/run/QI_analysis/results.txt
+        - Baseline:/pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis_method/baseline/qi/evenet/run/QI_analysis/results.txt
         - --output-prefix
-        - /path/to/external-checkpoint-run/qi-results/external
+        - /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis_method/baseline/qi-results/baseline
   resources:
     nodes: 1
     gpus_per_node: 0
