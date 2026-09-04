@@ -64,6 +64,7 @@ def build_runtime_config(
     base_config: Path,
     overlay_config: Path | None,
     backend: str,
+    runtime_parent: Path | None = None,
 ) -> Path:
     merged = read_yaml(base_config)
     if overlay_config is not None:
@@ -75,7 +76,11 @@ def build_runtime_config(
         merged["compat"]["repo_root"] = str(REPO_ROOT)
         merged.setdefault("rl", {})
         merged["rl"]["enabled"] = backend == "dgpo-evenet"
-    runtime_dir = Path(tempfile.mkdtemp(prefix="ztautau_dgpo_runtime_"))
+    if runtime_parent is not None:
+        runtime_parent.mkdir(parents=True, exist_ok=True)
+    runtime_dir = Path(
+        tempfile.mkdtemp(prefix="ztautau_dgpo_runtime_", dir=runtime_parent)
+    )
     runtime_path = runtime_dir / f"{backend}_runtime.yaml"
     with runtime_path.open("w") as handle:
         yaml.safe_dump(merged, handle, sort_keys=False)
@@ -134,6 +139,16 @@ def working_directory_for_backend(backend: str) -> Path:
     return EVENET_ALIGN_ROOT if backend == "evenet-align" else REPO_ROOT
 
 
+def ray_dir_from_args(args: list[str]) -> Path | None:
+    for index, value in enumerate(args):
+        if value in {"--ray-dir", "--ray_dir"} and index + 1 < len(args):
+            return Path(args[index + 1])
+        for prefix in ("--ray-dir=", "--ray_dir="):
+            if value.startswith(prefix):
+                return Path(value.removeprefix(prefix))
+    return None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Launch legacy EveNet, legacy DGPO, or EveNet-Align with a shared runtime config."
@@ -176,6 +191,13 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    passthrough = list(args.extra_args)
+    if passthrough and passthrough[0] == "--":
+        passthrough = passthrough[1:]
+    effective_ray_dir = args.ray_dir or ray_dir_from_args(passthrough)
+    if effective_ray_dir is not None:
+        effective_ray_dir = effective_ray_dir.expanduser().resolve()
+
     runtime_config = build_runtime_config(
         base_config=args.base_config.resolve(),
         overlay_config=(
@@ -187,13 +209,15 @@ def main() -> None:
             ).resolve()
         ),
         backend=args.backend,
+        runtime_parent=effective_ray_dir,
     )
     env = environment_for_backend(args.backend)
-    command = command_for_backend(args.backend, runtime_config, ray_dir=args.ray_dir)
-    if args.extra_args:
-        passthrough = list(args.extra_args)
-        if passthrough and passthrough[0] == "--":
-            passthrough = passthrough[1:]
+    command = command_for_backend(
+        args.backend,
+        runtime_config,
+        ray_dir=effective_ray_dir if args.ray_dir is not None else None,
+    )
+    if passthrough:
         command.extend(passthrough)
     print(" ".join(command), flush=True)
     subprocess.run(

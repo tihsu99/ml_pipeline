@@ -729,8 +729,10 @@ The wrapper accepts both `--ray-dir` and `--ray_dir`, then forwards the spelling
 required by the selected backend. Arguments after `--` remain a raw pass-through
 escape hatch for other trainer options.
 
-The launcher writes a temporary merged runtime YAML, sets `PYTHONPATH` so the
-vendored `evenet_dgpo` package is importable, and then dispatches to either
+The launcher writes the merged runtime YAML under `--ray-dir` when provided so
+every Ray node can read the same file. Without `--ray-dir`, it uses local
+temporary storage for single-node runs. It sets `PYTHONPATH` so the vendored
+`evenet_dgpo` package is importable, and then dispatches to either
 `evenet_dgpo/evenet/train.py` or
 `evenet_dgpo/RL/DGPO_neutrino/dgpo_trainer.py`.
 
