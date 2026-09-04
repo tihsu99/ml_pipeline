@@ -27,6 +27,7 @@ platform:
 options:
   default: ../EveNet-Align/share/options/options.yaml
   Training:
+    apply_event_weight: true
     epochs: 200
     total_epochs: 200
     pretrain_model_load_path: '/global/cfs/cdirs/m5019/yiren/Ztautau/shared_checkpoints/diffusion_5pct_seed42_best_val/epoch=224_train=0.1291_val=0.1279.ckpt'
