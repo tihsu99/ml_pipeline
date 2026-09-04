@@ -478,10 +478,14 @@ def interactive_commands(config: dict[str, Any], stage: str) -> list[dict[str, A
     resources = config[stage]["resources"]
     prefix: list[str] = []
     if config[stage]["srun"]:
+        tasks = resources["nodes"] if stage == "predict" else 1
         prefix = [
             "srun",
-            "--ntasks=1",
+            f"--nodes={resources['nodes']}",
+            f"--ntasks={tasks}",
+            "--ntasks-per-node=1",
             f"--cpus-per-task={resources['cpus_per_node']}",
+            "--kill-on-bad-exit=1",
         ]
         if resources["gpus_per_node"]:
             prefix.append(f"--gpus-per-task={resources['gpus_per_node']}")
@@ -497,6 +501,25 @@ def interactive_commands(config: dict[str, Any], stage: str) -> list[dict[str, A
         specs = configured_commands(config, stage)
     for working_directory, setup_scripts, command in specs:
         launch = shifter_command(command, shifter)
+        if stage == "predict" and resources["nodes"] > 1:
+            shard_launch = (
+                f"exec {shlex.join(launch)} "
+                '--task-num-shards "$SLURM_NTASKS" '
+                '--task-shard-index "$SLURM_PROCID" --skip-merge'
+            )
+            rendered.append({
+                "stage": stage,
+                "cwd": working_directory,
+                "command": [*prefix, "bash", "-lc", shard_launch],
+            })
+            rendered.append({
+                "stage": stage,
+                "cwd": working_directory,
+                "command": [
+                    *command, "--merge-only", "--delete-merged-parts",
+                ],
+            })
+            continue
         if setup_scripts:
             shell = " && ".join([
                 *(f"source {shlex.quote(str(path))}" for path in setup_scripts),

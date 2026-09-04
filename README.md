@@ -39,9 +39,10 @@ Run the enabled stages sequentially and stream their output to the terminal:
 ```
 
 Each stage has an optional YAML switch. The default is direct execution;
-enable `srun` only to launch one task inside an existing interactive Slurm
-allocation. The command inherits nodes, wall time, account, QOS, partition, and
-constraint from that allocation; it does not request another allocation:
+enable `srun` only to launch a job step inside an existing interactive Slurm
+allocation. Wall time, account, QOS, partition, and constraint are inherited
+from that allocation. For multi-node prediction, `resources.nodes` controls
+the number of one-task-per-node prediction shards:
 
 ```yaml
 predict:
@@ -61,6 +62,22 @@ Paths under `configs`, `checkpoints`, and known prediction options are resolved
 relative to this repository. A command may also set `working_directory`,
 `python`, and `setup_scripts`; this is used to source the parent
 `lep_tree_ana/setup.sh` before the central QI command.
+
+For `predict.srun: true` with `predict.resources.nodes: 4`, the central runner
+uses one four-node job step:
+
+```bash
+srun --nodes=4 --ntasks=4 --ntasks-per-node=1 \
+  --cpus-per-task=32 --gpus-per-task=4 \
+  bash -lc 'python3 predict_evenet.py ... \
+    --task-num-shards "$SLURM_NTASKS" \
+    --task-shard-index "$SLURM_PROCID" --skip-merge'
+```
+
+Each node handles one shard inside the same interactive allocation. After the
+job step finishes, `run.sh` performs one `--merge-only --delete-merged-parts`
+invocation, leaving the normal merged prediction output rather than four
+persistent part files.
 
 ## Evaluate Checkpoint A and B
 
