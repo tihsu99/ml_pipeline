@@ -144,17 +144,23 @@ def parse_args() -> argparse.Namespace:
         "--method",
         action="append",
         required=True,
+        metavar="LABEL{=,:}PATH",
         help=(
-            "Method spec Label:/path/to/results.txt or Label:/path/to/directory. "
+            "Method spec LABEL=PATH or LABEL:PATH for a results.txt file or directory. "
             "If a directory is supplied, the script searches common results.txt locations. "
             "Repeat for Baseline, EveNet-Pretrain, Scratch, etc."
         ),
     )
     parser.add_argument(
         "--output-prefix",
+        "--output-dir",
+        dest="output_prefix",
         type=Path,
         required=True,
-        help="Output prefix. Writes <prefix>_per_channel.*, <prefix>_combined.*, and summary plots.",
+        help=(
+            "Output prefix. Writes <prefix>_per_channel.*, <prefix>_combined.*, and summary plots. "
+            "--output-dir is accepted as a compatibility alias."
+        ),
     )
     parser.add_argument(
         "--keep-truth",
@@ -211,12 +217,16 @@ def parse_args() -> argparse.Namespace:
 def parse_method_specs(specs: Iterable[str]) -> list[tuple[str, Path]]:
     methods: list[tuple[str, Path]] = []
     for spec in specs:
-        if ":" not in spec:
-            raise ValueError(f"Invalid --method '{spec}'. Expected Label:/path/to/results.txt")
-        label, raw_path = spec.split(":", 1)
+        split_positions = [index for index in (spec.find("="), spec.find(":")) if index > 0]
+        if not split_positions:
+            raise ValueError(
+                f"Invalid --method '{spec}'. Expected LABEL=PATH or LABEL:PATH."
+            )
+        split_at = min(split_positions)
+        label, raw_path = spec[:split_at], spec[split_at + 1:]
         label = label.strip()
-        if not label:
-            raise ValueError(f"Invalid --method '{spec}'. Empty method label.")
+        if not label or not raw_path.strip():
+            raise ValueError(f"Invalid --method '{spec}'. Label and path are required.")
         methods.append((label, resolve_results_path(Path(raw_path))))
     return methods
 
@@ -1113,7 +1123,9 @@ def main() -> None:
 
     if not per_channel_rows:
         raise ValueError(
-            "No final measurements found. Check that each input contains Unfolded/Final B/C or Quantum sections."
+            "No final measurements found. This tool expects QIProcessor output, normally "
+            "<run>/QI_analysis/results.txt, containing Unfolded/Final B/C or Quantum sections. "
+            "ForwardFoldingProcessor results are not final-measurement inputs."
         )
 
     combined_rows = combine_all_channels(

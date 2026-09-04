@@ -41,7 +41,7 @@ def parse_args() -> argparse.Namespace:
         "--method",
         action="append",
         required=True,
-        metavar="LABEL=PATH",
+        metavar="LABEL{=,:}PATH",
         help="Method label and prediction parquet file/directory. Repeat for every method.",
     )
     parser.add_argument("--analysis-config", type=Path, required=True)
@@ -50,7 +50,14 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path(__file__).resolve().parent / "config" / "prediction_comparison.yaml",
     )
-    parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument(
+        "--output-dir",
+        "--output-prefix",
+        dest="output_dir",
+        type=Path,
+        required=True,
+        help="Output directory. --output-prefix is accepted as a compatibility alias.",
+    )
     parser.add_argument(
         "--max-events",
         type=int,
@@ -69,9 +76,11 @@ def read_yaml(path: Path) -> dict[str, Any]:
 
 
 def parse_method(spec: str) -> tuple[str, Path]:
-    if "=" not in spec:
-        raise ValueError(f"Invalid --method {spec!r}; expected LABEL=PATH.")
-    label, raw_path = spec.split("=", 1)
+    split_positions = [index for index in (spec.find("="), spec.find(":")) if index > 0]
+    if not split_positions:
+        raise ValueError(f"Invalid --method {spec!r}; expected LABEL=PATH or LABEL:PATH.")
+    split_at = min(split_positions)
+    label, raw_path = spec[:split_at], spec[split_at + 1:]
     label = label.strip()
     path = Path(raw_path).expanduser()
     if not label or not raw_path.strip():
