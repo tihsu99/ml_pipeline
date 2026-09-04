@@ -121,15 +121,15 @@ BC_PARAMETER_ORDER = [
     "B_Br",
     "B_Ak",
     "B_Bk",
-    "C_nn",
+    "Cnn",
     "C_nr",
     "C_nk",
     "C_rn",
-    "C_rr",
+    "Crr",
     "C_rk",
     "C_kn",
     "C_kr",
-    "C_kk",
+    "Ckk",
 ]
 
 
@@ -281,6 +281,7 @@ def parse_results_text(
     signal: str | None = None
     section_source: str | None = None
     section_group: str | None = None
+    combined_fit = False
 
     for raw_line in text.splitlines():
         line = raw_line.strip()
@@ -292,6 +293,15 @@ def parse_results_text(
             signal = region
             section_source = "Unfolded"
             section_group = None
+            combined_fit = False
+            continue
+
+        if line.startswith("Combined fit regions:"):
+            region = COMBINED_REGION
+            signal = COMBINED_SIGNAL
+            section_source = "Unfolded"
+            section_group = None
+            combined_fit = True
             continue
 
         header_match = UNFOLDING_HEADER_RE.match(line)
@@ -300,6 +310,7 @@ def parse_results_text(
             region = header_match.group("region").strip()
             section_source = None
             section_group = None
+            combined_fit = False
             continue
 
         section_match = SECTION_RE.match(line)
@@ -313,20 +324,21 @@ def parse_results_text(
             continue
         if region is None or signal is None or section_source is None:
             continue
-        if section_group is None:
-            parameter_name = canonical_parameter_name(str(parsed_value["name"]))
+        parameter_name = canonical_parameter_name(str(parsed_value["name"]))
+        if section_group is None or combined_fit:
             if parameter_name in BC_PARAMETER_ORDER:
-                section_group = "BC"
+                row_group = "BC"
             elif parameter_name in QUANTUM_PARAMETER_ORDER:
-                section_group = "quantum"
+                row_group = "quantum"
             else:
                 continue
+        else:
+            row_group = section_group
         if section_source == "Truth" and not keep_truth:
             continue
         if region in ignored_regions:
             continue
 
-        parameter_name = canonical_parameter_name(str(parsed_value["name"]))
         rows.append(
             {
                 "method": method,
@@ -334,12 +346,12 @@ def parse_results_text(
                 "signal": signal,
                 "channel": canonical_channel_key(region, signal),
                 "source": section_source,
-                "group": section_group,
+                "group": row_group,
                 "parameter": parameter_name,
                 "value": float(parsed_value["value"]),
                 "err_up": float(parsed_value["err_up"]),
                 "err_down": float(parsed_value["err_down"]),
-                "is_combined": False,
+                "is_combined": combined_fit,
             }
         )
 
@@ -1109,7 +1121,7 @@ def main() -> None:
     args = parse_args()
     ignored_regions = set() if args.keep_hadhad else DEFAULT_IGNORED_REGIONS
 
-    per_channel_rows: list[dict[str, Any]] = []
+    parsed_rows: list[dict[str, Any]] = []
     for method, results_path in parse_method_specs(args.method):
         rows = parse_results_text(
             results_path.read_text(),
@@ -1118,22 +1130,23 @@ def main() -> None:
             ignored_regions=ignored_regions,
         )
         rows = filter_rows(rows, args.include_groups, args.only_key_quantum)
-        per_channel_rows.extend(rows)
+        parsed_rows.extend(rows)
         print(f"[qi-final] method={method} rows={len(rows)} path={results_path}", flush=True)
 
-    if not per_channel_rows:
+    if not parsed_rows:
         raise ValueError(
-            "No final measurements found. This tool expects QIProcessor output, normally "
-            "<run>/QI_analysis/results.txt, containing Unfolded/Final B/C or Quantum sections. "
-            "ForwardFoldingProcessor results are not final-measurement inputs."
+            "No final measurements found. Expected QIProcessor Unfolded/Final B/C or Quantum "
+            "sections, or a ForwardFoldingProcessor 'Combined fit regions:' result."
         )
 
-    combined_rows = combine_all_channels(
-        per_channel_rows,
+    per_channel_rows = [row for row in parsed_rows if not row.get("is_combined", False)]
+    combined_rows = [row for row in parsed_rows if row.get("is_combined", False)]
+    combined_rows.extend(combine_all_channels(
+        parsed_rows,
         combination_model=args.combination_model,
         apply_tension_scale=not args.no_tension_scale,
         debug=args.debug,
-    )
+    ))
     all_rows = sorted_rows(per_channel_rows + combined_rows)
     combined_rows = sorted_rows(combined_rows)
     per_channel_rows = sorted_rows(per_channel_rows)

@@ -896,6 +896,18 @@ python3 ml_pipeline/extract_qi_final_measurements.py \
   --output-prefix "$CAMPAIGN_DIR/qi-results/baseline-vs-evenet"
 ```
 
+Already-combined forward-folding results are accepted as well:
+
+```bash
+python3 ml_pipeline/extract_qi_final_measurements.py \
+  --method Baseline:"$OUTPUT_ROOT/Baseline/ForwardFoldingProcessor_asimovdata/results.txt" \
+  --method DGPO:"$OUTPUT_ROOT/DGPO/ForwardFoldingProcessor_asimovdata/results.txt" \
+  --output-prefix "$CAMPAIGN_DIR/qi-results/baseline-vs-dgpo-forward-folding"
+```
+
+Rows following `Combined fit regions:` are kept as combined measurements and
+are not combined a second time.
+
 ### Summarize Response Matrices
 
 ```bash
