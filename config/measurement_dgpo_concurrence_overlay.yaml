@@ -1,0 +1,85 @@
+# Production concurrence Measurement-DGPO overlay.
+logger:
+  wandb:
+    enabled: true
+    project: "DGPO-Measurement"
+    run_name: &logger_name "LEP-TauNu-Concurrence-DGPO"
+    tags: ["EveNet", "LEP", "concurrence"]
+    entity: ytchou97-university-of-washington
+    simplified: false
+  local:
+    save_dir: /pscratch/sd/t/tihsu/tmp/
+    name: *logger_name
+    version: v1
+
+platform:
+  data_parquet_dir: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis/evenet-input/train-diffusion
+  data_parquet_val_dir: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis/evenet-input/val-diffusion
+  number_of_workers: 4
+  resources_per_worker:
+    CPU: 4
+    GPU: 1
+  batch_size: 2048
+  prefetch_batches: 1
+  use_gpu: true
+
+options:
+  default: ../EveNet-Align/share/options/options.yaml
+  Training:
+    apply_event_weight: true
+    epochs: 200
+    total_epochs: 200
+    pretrain_model_load_path: '/global/cfs/cdirs/m5019/yiren/Ztautau/shared_checkpoints/diffusion_5pct_seed42_best_val/epoch=224_train=0.1291_val=0.1279.ckpt'
+    model_checkpoint_save_path: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis/checkpoint-pretrain-DGPO-concurrence
+    model_checkpoint_save_top_k: 1
+    strategy:
+      default: ../EveNet-Align/share/strategies/measurement_dgpo_concurrence.yaml
+      name: measurement_dgpo
+      objective:
+        mode: concurrence
+      concurrence:
+        max_sdm_degradation: null
+      selection_metric: val/J_concurrence
+      channels:
+        min_score_events: 100
+        fail_on_insufficient_score_coverage: true
+      rollout:
+        candidates: 4
+        ddim_steps: 10
+      score:
+        pool_events: "50%"
+        hidden_dim: 64
+        hidden_layers: 2
+        epochs: 20
+        batch_size: 256
+        input_mode: joint
+      policy:
+        local_epochs: 1
+        timesteps: 2
+        event_microbatch_size: 128
+        reward_scale: 1.0
+        scale_reward_by_reference_events: true
+        reference_trust: 0.0
+      validation:
+        score_pool_events: "50%"
+        candidates: 8
+        max_batches: null
+        every_n_epochs: 1
+        min_relative_improvement: 0.002
+        split_noise_multiplier: 2.0
+        require_score_parity: true
+      diagnostics:
+        replacement_check_events: 8
+        full_fisher: true
+        physics_plots: true
+        physics_plot_events: 10000
+        binned_measurement: true
+        binned_measurement_events: null
+        binned_measurement_accepted_only: true
+        log_per_parameter_metrics: false
+  Dataset:
+    dataset_limit: 0.05
+    dataset_limit_apply_to_val_set: true
+
+network:
+  default: ../EveNet-Align/share/network/network-20M.yaml
