@@ -48,9 +48,10 @@ options:
         class_path: measurement_plugins.evenet_ztautau:ZTauTauSpinMeasurementPlugin
         options:
           candidate_feature_names: [theta, phi]
+          diagnostic_bins: 50
       rollout:
-        candidates: 8
-        ddim_steps: 20
+        candidates: 4
+        ddim_steps: 10
       score:
         pool_events: "10%"
         hidden_dim: 64
@@ -79,6 +80,7 @@ options:
         binned_measurement: true
         binned_measurement_events: null
         binned_measurement_accepted_only: true
+        log_per_parameter_metrics: false
   Dataset:
     dataset_limit: 0.05
     dataset_limit_apply_to_val_set: true
