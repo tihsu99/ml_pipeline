@@ -1,0 +1,94 @@
+pipeline:
+  name: ztautau_DGPO_0p05training_data
+  output_dir: generated/ztautau_DGPO_0p05training_data
+
+configs:
+  train: config/train_pretrain.yaml
+  analysis: config/analysis.yaml
+  evenet_schema: config/evenet_schema.yaml
+
+checkpoints:
+  classification:
+    source: external
+    path: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis/checkpoint-pretrain-cls/last.ckpt
+  diffusion:
+    source: external
+    path: "/global/cfs/cdirs/m5019/yiren/Ztautau/shared_checkpoints/5pct_dgpo_checkpoints/last.ckpt"
+train:
+  enabled: false
+  srun: true
+
+predict:
+  enabled: true
+  srun: true
+  options:
+    normalization_file: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis/evenet-input/normalization.pt
+    converted_parquet:
+      - /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis/evenet-input/test
+    shape_metadata: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis/evenet-input/shape_metadata.json
+    output_dir: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis_method/DGPO/prediction
+    converted_split_fraction: 0.2
+    batch_size: 8192
+    num_steps: 20
+  resources:
+    nodes: 4
+    gpus_per_node: 4
+    cpus_per_node: 32
+    time: "04:00:00"
+    account: m5019
+    qos: regular
+    constraint: gpu
+  shifter:
+    enabled: true
+    image: registry.nersc.gov/m2616/avencast/evenet:1.3
+
+eval:
+  enabled: true
+  srun: false
+  entrypoint: export_evenet_qi_inputs.py
+  args:
+    - --analysis-config
+    - config/analysis.yaml
+    - --prediction-parquet
+    - /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis_method/DGPO/prediction/*__evenet_pred.parquet
+    - --base-dir
+    - /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis_method/DGPO/qi
+    - --methods
+    - evenet
+  resources:
+    nodes: 1
+    gpus_per_node: 0
+    cpus_per_node: 4
+    time: "02:00:00"
+    account: m5019
+    qos: regular
+  shifter:
+    enabled: false
+
+fit:
+  enabled: true
+  srun: false
+  commands:
+    - entrypoint: bin/tree_ana
+      working_directory: ..
+      python: true
+      setup_scripts:
+        - setup.sh
+      args:
+        - --config-yaml
+        - /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis_method/DGPO/qi/evenet/config_evenet.yaml
+    - entrypoint: extract_qi_final_measurements.py
+      args:
+        - --method
+        - DGPO:/pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis_method/DGPO/qi/evenet/run/QI_analysis/results.txt
+        - --output-prefix
+        - /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis_method/DGPO/qi-results/DGPO
+  resources:
+    nodes: 1
+    gpus_per_node: 0
+    cpus_per_node: 32
+    time: "02:00:00"
+    account: m5019
+    qos: regular
+  shifter:
+    enabled: false
