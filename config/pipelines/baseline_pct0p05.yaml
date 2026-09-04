@@ -31,7 +31,7 @@ predict:
     batch_size: 8192
     num_steps: 20
   resources:
-    nodes: 1
+    nodes: 4
     gpus_per_node: 4
     cpus_per_node: 32
     time: "04:00:00"
