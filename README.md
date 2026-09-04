@@ -39,7 +39,9 @@ Run the enabled stages sequentially and stream their output to the terminal:
 ```
 
 Each stage has an optional YAML switch. The default is direct execution;
-enable `srun` only where a Slurm allocation is needed:
+enable `srun` only to launch one task inside an existing interactive Slurm
+allocation. The command inherits nodes, wall time, account, QOS, partition, and
+constraint from that allocation; it does not request another allocation:
 
 ```yaml
 predict:

@@ -480,16 +480,11 @@ def interactive_commands(config: dict[str, Any], stage: str) -> list[dict[str, A
     if config[stage]["srun"]:
         prefix = [
             "srun",
-            f"--nodes={resources['nodes']}",
             "--ntasks=1",
             f"--cpus-per-task={resources['cpus_per_node']}",
-            f"--time={resources['time']}",
         ]
         if resources["gpus_per_node"]:
             prefix.append(f"--gpus-per-task={resources['gpus_per_node']}")
-        for key in ("account", "qos", "constraint", "partition"):
-            if key in resources:
-                prefix.append(f"--{key}={resources[key]}")
 
     rendered = []
     shifter = config[stage]["shifter"]
