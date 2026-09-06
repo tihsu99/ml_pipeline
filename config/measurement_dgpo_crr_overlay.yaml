@@ -27,7 +27,7 @@ platform:
   # 4 workers x 512 events = 2048 generated events per optimizer step.
   number_of_workers: 16
   resources_per_worker:
-    CPU: 20
+    CPU: 4
     GPU: 1
   batch_size: 2048
   prefetch_batches: 2
