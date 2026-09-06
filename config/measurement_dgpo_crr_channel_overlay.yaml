@@ -113,8 +113,8 @@ options:
           enabled: true
 
           # One deterministic midpoint refresh per 16-step trial.
-          every_n_policy_steps: 8
-          max_refreshes_per_trial: 1
+          every_n_policy_steps: 1
+          max_refreshes_per_trial: 16
 
       policy:
         local_epochs: 2
