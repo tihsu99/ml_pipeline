@@ -154,6 +154,12 @@ options:
         crr_update_debug_every_n_steps: 8
         crr_update_debug_events: 16
         crr_update_debug_gradient_epsilon: 1.0e-4
+        # Extra pre-step probes immediately after refresh and after one update.
+        crr_update_debug_score_ages: [0, 1, 7]
+        # Global event cap; fixed disjoint training-score events, live-policy fits.
+        crr_diagnostic_refit: true
+        crr_diagnostic_refit_events: 8192
+        crr_diagnostic_refit_epochs: 50
         replacement_check_events: 16
         full_fisher: true
 
