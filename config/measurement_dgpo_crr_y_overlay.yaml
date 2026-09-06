@@ -1,30 +1,30 @@
-# Focused single-target Crr Measurement-DGPO diagnostic campaign.
+# Matched Crr score-input campaign; only mode and W&B identity differ.
 
 logger:
   wandb:
     enabled: true
     project: "DGPO-Measurement"
-    run_name: &logger_name "LEP-TauNu-Crr-AdaptiveRefresh-Debug"
+    run_name: "LEP-TauNu-Crr-ScoreInputs-y"
     tags:
       - "EveNet"
       - "LEP"
       - "Crr"
       - "adaptive-score-refresh"
       - "single-target-debug"
+      - "crr-input-y"
     entity: ytchou97-university-of-washington
     simplified: false
 
   local:
-    save_dir: /pscratch/sd/t/tihsu/tmp/
-    name: *logger_name
+    save_dir: ./logs
+    name: "LEP-TauNu-Crr-ScoreInputs"
     version: v1
 
 platform:
   data_parquet_dir: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis/evenet-input/train-diffusion
   data_parquet_val_dir: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis/evenet-input/val-diffusion
 
-  # Debug with a moderate global batch:
-  # 4 workers x 512 events = 2048 generated events per optimizer step.
+  # Keep the existing campaign worker count and per-worker batch unchanged.
   number_of_workers: 16
   resources_per_worker:
     CPU: 4
@@ -37,6 +37,7 @@ options:
   default: ../EveNet-Align/share/options/options.yaml
 
   Training:
+    seed: 42
     apply_event_weight: true
 
     # 2 logical epochs per trial -> 10 independent validation attempts.
@@ -45,7 +46,7 @@ options:
 
     pretrain_model_load_path: /global/cfs/cdirs/m5019/yiren/Ztautau/shared_checkpoints/diffusion_5pct_seed42_best_val/epoch=224_train=0.1291_val=0.1279.ckpt
 
-    model_checkpoint_save_path: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis/checkpoint-pretrain-DGPO-Crr-adaptive-debug
+    model_checkpoint_save_path: ./outputs/crr_score_inputs/checkpoints
     model_checkpoint_save_top_k: 1
 
     strategy:
@@ -106,6 +107,7 @@ options:
         learning_rate: 2.0e-4
         weight_decay: 1.0e-5
         input_mode: target_separated
+        crr_input_mode: y
 
         adaptive_refresh:
           enabled: true
@@ -146,6 +148,8 @@ options:
         require_score_parity: false
 
       diagnostics:
+        crr_input_comparison: true
+        score_min_bin_neff: 10
         replacement_check_events: 16
         full_fisher: true
 
