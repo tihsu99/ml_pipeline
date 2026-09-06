@@ -43,6 +43,7 @@ options:
         targets: [Crr]
         options:
           candidate_feature_names: [theta, phi]
+          analyzing_power_source: event_category
       rollout:
         candidates: 6
         ddim_steps: 10
