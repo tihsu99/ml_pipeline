@@ -150,6 +150,10 @@ options:
       diagnostics:
         crr_input_comparison: true
         score_min_bin_neff: 10
+        crr_update_debug: true
+        crr_update_debug_every_n_steps: 8
+        crr_update_debug_events: 16
+        crr_update_debug_gradient_epsilon: 1.0e-4
         replacement_check_events: 16
         full_fisher: true
 
