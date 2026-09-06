@@ -25,11 +25,11 @@ platform:
 
   # Debug with a moderate global batch:
   # 4 workers x 512 events = 2048 generated events per optimizer step.
-  number_of_workers: 4
+  number_of_workers: 16
   resources_per_worker:
-    CPU: 4
+    CPU: 20
     GPU: 1
-  batch_size: 512
+  batch_size: 2048
   prefetch_batches: 2
   use_gpu: true
 
