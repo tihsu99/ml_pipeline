@@ -131,7 +131,21 @@ options:
       # Disable the concurrence/local-velocity controller entirely.
       # This run is meant to isolate score and policy behavior.
       trust_region:
-        enabled: false
+        enabled: true
+
+        # Your finite-step scan says ~0.1–0.3 of the current optimizer
+        # displacement is beneficial, while 1.0 overshoots.
+        initial_lr_scale: 0.25
+        min_lr_scale: 0.25
+
+        max_velocity_rms: 0.05
+
+        max_backtracks: 4
+        backtrack_factor: 0.5
+
+        # Keep proposal scale fixed during this diagnostic campaign.
+        shrink_factor: 0.5
+        growth_factor: 1.0
 
       validation:
         score_pool_events: "50%"
