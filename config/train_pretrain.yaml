@@ -116,7 +116,7 @@ options:
 
     EMA:
       enable: true
-      decay: 0.5
+      decay: 0.9
       start_epoch: 0
       update_every_n_steps: 1
       replace_model_after_load: true

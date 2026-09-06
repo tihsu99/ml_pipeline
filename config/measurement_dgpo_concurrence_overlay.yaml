@@ -3,8 +3,8 @@ logger:
   wandb:
     enabled: true
     project: "DGPO-Measurement"
-    run_name: &logger_name "LEP-TauNu-Concurrence-DGPO"
-    tags: ["EveNet", "LEP", "concurrence"]
+    run_name: &logger_name "LEP-TauNu-Concurrence-DGPO-LocalTrust"
+    tags: ["EveNet", "LEP", "concurrence", "local-velocity-trust", "no-KL"]
     entity: ytchou97-university-of-washington
     simplified: false
   local:
@@ -30,7 +30,7 @@ options:
     epochs: 200
     total_epochs: 200
     pretrain_model_load_path: '/global/cfs/cdirs/m5019/yiren/Ztautau/shared_checkpoints/diffusion_5pct_seed42_best_val/epoch=224_train=0.1291_val=0.1279.ckpt'
-    model_checkpoint_save_path: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis/checkpoint-pretrain-DGPO-concurrence
+    model_checkpoint_save_path: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis/checkpoint-pretrain-DGPO-concurrence-local-trust
     model_checkpoint_save_top_k: 1
     strategy:
       default: ../EveNet-Align/share/strategies/measurement_dgpo_concurrence.yaml
@@ -60,6 +60,18 @@ options:
         reward_scale: 1.0
         scale_reward_by_reference_events: true
         reference_trust: 0.0
+      # Moving, per-step velocity budget; no frozen reference or KL penalty.
+      # These are conservative starting values, not physics-validated optima.
+      trust_region:
+        enabled: true
+        max_velocity_rms: 0.05
+        probe_events: 16
+        max_backtracks: 4
+        backtrack_factor: 0.5
+        initial_lr_scale: 0.1
+        min_lr_scale: 0.001
+        shrink_factor: 0.5
+        growth_factor: 1.1
       validation:
         score_pool_events: "50%"
         candidates: 8
@@ -75,7 +87,7 @@ options:
         physics_plot_events: 10000
         binned_measurement: true
         binned_measurement_events: null
-        binned_measurement_accepted_only: true
+        binned_measurement_accepted_only: false
         log_per_parameter_metrics: false
   Dataset:
     dataset_limit: 0.05
