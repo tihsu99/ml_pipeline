@@ -53,6 +53,12 @@ options:
         epochs: 20
         batch_size: 256
         input_mode: joint
+        # Fixed-cadence training-score refresh. Set drift_threshold only after
+        # measuring the same-population objective-gap distribution.
+        adaptive_refresh:
+          enabled: true
+          every_n_policy_steps: 25
+          drift_threshold: null
       policy:
         local_epochs: 1
         timesteps: 2
@@ -80,6 +86,7 @@ options:
         min_relative_improvement: 0.002
         split_noise_multiplier: 2.0
         require_score_parity: true
+        require_sdm_score_parity: false
       diagnostics:
         replacement_check_events: 8
         full_fisher: true
@@ -89,6 +96,8 @@ options:
         binned_measurement_events: null
         binned_measurement_accepted_only: false
         log_per_parameter_metrics: false
+        score_plots: true
+        score_plot_events: 2000
   Dataset:
     dataset_limit: 0.05
     dataset_limit_apply_to_val_set: true
