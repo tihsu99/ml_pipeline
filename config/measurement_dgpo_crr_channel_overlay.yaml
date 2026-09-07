@@ -154,6 +154,7 @@ options:
         score_pool_events: "50%"
         candidates: 8
         max_batches: null
+        rollback_on_reject: false
 
         every_n_epochs: 2
 
