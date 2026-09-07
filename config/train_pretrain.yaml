@@ -115,7 +115,7 @@ options:
       detailed_loss: false
 
     EMA:
-      enable: true
+      enable: false
       decay: 0.9
       start_epoch: 0
       update_every_n_steps: 1

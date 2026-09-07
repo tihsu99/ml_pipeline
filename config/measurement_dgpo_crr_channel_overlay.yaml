@@ -108,13 +108,16 @@ options:
         weight_decay: 1.0e-5
         input_mode: target_separated
         crr_input_mode: y_channel
-
-        adaptive_refresh:
+        on_policy_crossfit:
           enabled: true
+          epochs: 10
 
-          # One deterministic midpoint refresh per 16-step trial.
-          every_n_policy_steps: 1
-          max_refreshes_per_trial: 16
+#        adaptive_refresh:
+#          enabled: true
+#
+#          # One deterministic midpoint refresh per 16-step trial.
+#          every_n_policy_steps: 1
+#          max_refreshes_per_trial: 16
 
       policy:
         local_epochs: 2
