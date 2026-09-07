@@ -110,6 +110,7 @@ options:
         crr_input_mode: y_channel
         on_policy_crossfit:
           enabled: true
+          estimator: binned
           epochs: 30
 
 #        adaptive_refresh:
