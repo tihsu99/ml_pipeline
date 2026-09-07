@@ -1,0 +1,46 @@
+# Paths may point to *_combined.json/csv files from extract_qi_final_measurements.py
+# or to results.txt files that already contain a "Combined fit regions:" block.
+metrics: [B_An, B_Ak, B_Ar, Cnn, Crr, Ckk, Concurrence, Ckk + Cnn]
+
+plot:
+  log_x: true
+  log_y: false
+
+# 1% dataset (total 5 M)
+baseline_50k:
+  dataset_size: 50000
+  flag: Baseline
+  path: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis_method/baseline_0p01/qi/evenet/run/ForwardFoldingProcessor_asimovdata/results.txt
+
+DGPO_50k:
+  dataset_size: 50000
+  flag: DGPO
+  path: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis_method/DGPO_0p01/qi/evenet/run/ForwardFoldingProcessor_asimovdata/results.txt
+
+# 5% dataset (total 5 M)
+baseline_250k:
+  dataset_size: 250000
+  flag: Baseline
+  path: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis_method/baseline_0p05/qi/evenet/run/ForwardFoldingProcessor_asimovdata/results.txt
+
+DGPO_250k:
+  dataset_size: 250000
+  flag: DGPO
+  path: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis_method/DGPO_0p05/qi/evenet/run/ForwardFoldingProcessor_asimovdata/results.txt
+
+# 10% dataset (total 5 M)
+baseline_500k:
+  dataset_size: 500000
+  flag: Baseline
+  path: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis_method/baseline_0p1/qi/evenet/run/ForwardFoldingProcessor_asimovdata/results.txt
+
+DGPO_500k:
+  dataset_size: 500000
+  flag: DGPO
+  path: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis_method/DGPO_0p1/qi/evenet/run/ForwardFoldingProcessor_asimovdata/results.txt
+
+baseline_full:
+  dataset_size: 5000000
+  flag: Baseline
+  path: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis_method/baseline_full/qi/evenet/run/ForwardFoldingProcessor_asimovdata/results.txt
+  dash_line: true
