@@ -27,8 +27,8 @@ options:
   Training:
     seed: 42
     apply_event_weight: true
-    epochs: 20
-    total_epochs: 20
+    epochs: 30
+    total_epochs: 30
     pretrain_model_load_path: /global/cfs/cdirs/m5019/yiren/Ztautau/shared_checkpoints/diffusion_5pct_seed42_best_val/epoch=224_train=0.1291_val=0.1279.ckpt
     model_checkpoint_save_path: ./outputs/crr_projection_5pct/checkpoints
     model_checkpoint_save_top_k: 1
