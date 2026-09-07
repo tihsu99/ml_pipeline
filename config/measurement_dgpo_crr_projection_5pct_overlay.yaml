@@ -1,0 +1,134 @@
+# Full-pass projection run, based on measurement_dgpo_crr_channel_overlay.yaml.
+# Merge with config/train_pretrain.yaml through train_neutrino_backend.py.
+logger:
+  wandb:
+    enabled: true
+    project: DGPO-Measurement
+    run_name: LEP-TauNu-Crr-Projection-Binned-5pct
+    tags: [EveNet, LEP, Crr, projection-reward, onpolicy-binned, full-pass-5pct]
+    entity: ytchou97-university-of-washington
+    simplified: true
+  local:
+    save_dir: ./logs
+    name: LEP-TauNu-Crr-Projection-Binned-5pct
+    version: v1
+
+platform:
+  data_parquet_dir: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis/evenet-input/train-diffusion
+  data_parquet_val_dir: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis/evenet-input/val-diffusion
+  number_of_workers: 16
+  resources_per_worker: {CPU: 4, GPU: 1}
+  batch_size: 2048
+  prefetch_batches: 2
+  use_gpu: true
+
+options:
+  default: ../EveNet-Align/share/options/options.yaml
+  Training:
+    seed: 42
+    apply_event_weight: true
+    epochs: 20
+    total_epochs: 20
+    pretrain_model_load_path: /global/cfs/cdirs/m5019/yiren/Ztautau/shared_checkpoints/diffusion_5pct_seed42_best_val/epoch=224_train=0.1291_val=0.1279.ckpt
+    model_checkpoint_save_path: ./outputs/crr_projection_5pct/checkpoints
+    model_checkpoint_save_top_k: 1
+    Performance:
+      enabled: true
+      log_every_n_steps: 100
+      tensor_debug_scans: false
+      gradient_diagnostics: false
+      rich_metrics: false
+    strategy:
+      default: ../EveNet-Align/share/strategies/measurement_dgpo.yaml
+      name: measurement_dgpo
+      objective: {mode: cdiag_conditional}
+      selection_metric: val/J_cond
+      # Exhaust the policy shard each epoch, rather than eight debug steps.
+      steps_per_epoch: null
+      plugin:
+        class_path: measurement_plugins.evenet_ztautau:ZTauTauSpinMeasurementPlugin
+        targets: [Crr]
+        options:
+          candidate_feature_names: [theta, phi]
+          analyzing_power_source: event_category
+          diagnostic_bins: 50
+      channels:
+        enabled: true
+        mixture_source: physical_sample
+        weights: {}
+        min_score_events: 100
+        fail_on_insufficient_score_coverage: false
+        representative: [Ztautau_pipi, Ztautau_pirho, Ztautau_pie]
+        major_min_fraction: 0.01
+        severe_efficiency_ratio: 0.5
+      rollout: {candidates: 6, ddim_steps: 10}
+      score:
+        # No auxiliary training-score split, MLP fit, or policy Fisher cache.
+        fit_active_score: false
+        pool_events: 0
+        # These MLP settings still define the independent validation fit.
+        hidden_dim: 64
+        hidden_layers: 2
+        epochs: 50
+        batch_size: 1024
+        learning_rate: 2.0e-4
+        weight_decay: 1.0e-5
+        input_mode: target_separated
+        crr_input_mode: y_channel
+        on_policy_crossfit:
+          enabled: true
+          # Matches the current channel template; binned uses y only.
+          estimator: binned
+        adaptive_refresh: {enabled: false}
+      policy:
+        local_epochs: 2
+        timesteps: 4
+        event_microbatch_size: 128
+        reward_mode: projection
+        reward_scale: 1.0
+        scale_reward_by_reference_events: true
+        reference_trust: 0.0
+        advantage_clip: null
+        gradient_clip: 1.0
+      trust_region:
+        enabled: true
+        initial_lr_scale: 0.25
+        min_lr_scale: 0.25
+        max_velocity_rms: 0.05
+        max_backtracks: 4
+        backtrack_factor: 0.5
+        shrink_factor: 0.5
+        growth_factor: 1.0
+      validation:
+        score_pool_events: "50%"
+        candidates: 8
+        max_batches: null
+        every_n_epochs: 2
+        min_relative_improvement: 0.002
+        split_noise_multiplier: 2.0
+        require_score_parity: false
+        # Preserve the channel template's continue-on-reject experiment.
+        # Use true for normal validation rollback.
+        rollback_on_reject: false
+      diagnostics:
+        score_plots: false
+        crr_reward_comparison: false
+        crr_input_comparison: false
+        crr_update_debug: false
+        crr_update_debug_score_ages: []
+        crr_diagnostic_refit: false
+        score_refit_replicates: 0
+        full_fisher: false
+        physics_plots: false
+        response_matrices: false
+        # Keep the independent physics measurement and useful scalar history.
+        binned_measurement: true
+        binned_measurement_events: null
+        binned_measurement_accepted_only: false
+        log_per_parameter_metrics: true
+  Dataset:
+    dataset_limit: 0.05
+    dataset_limit_apply_to_val_set: false
+
+network:
+  default: ../EveNet-Align/share/network/network-20M.yaml
