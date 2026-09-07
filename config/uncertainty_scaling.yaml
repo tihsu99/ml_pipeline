@@ -5,6 +5,7 @@ metrics: [B_An, B_Ak, B_Ar, Cnn, Crr, Ckk, Concurrence, Ckk + Cnn]
 plot:
   log_x: true
   log_y: false
+# A grouped signed-sensitivity bar plot is also written for every metric.
 
 # 1% dataset (total 5 M)
 baseline_50k:

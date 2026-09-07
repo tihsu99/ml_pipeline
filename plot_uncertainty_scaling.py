@@ -17,7 +17,22 @@ import matplotlib.pyplot as plt
 import yaml
 
 
+matplotlib.rcParams.update({
+    "font.family": "sans-serif",
+    "font.sans-serif": ["Arial", "DejaVu Sans", "Liberation Sans"],
+    "font.size": 8,
+    "axes.spines.right": False,
+    "axes.spines.top": False,
+    "axes.linewidth": 0.8,
+    "legend.frameon": False,
+    "pdf.fonttype": 42,
+    "svg.fonttype": "none",
+})
+
+
 RESERVED_CONFIG_KEYS = {"metrics", "plot"}
+COLORS = ("#0F4D92", "#8BCF8B", "#B64342", "#42949E", "#9A4D8E", "#CFCECE")
+HATCHES = ("", "//", "\\\\", "..", "xx")
 NUMBER = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
 ASYMMETRIC_LINE = re.compile(
     rf"^\s*(?P<metric>.+?)\s+(?P<value>{NUMBER})\s+"
@@ -47,6 +62,11 @@ def canonical_metric(name: object) -> str:
 
 def as_bool(value: object) -> bool:
     return value is True or str(value).strip().lower() in {"1", "true", "yes"}
+
+
+def sensitivity_value(value: float, err_up: float, err_down: float) -> float:
+    uncertainty = err_down if value > 0 else err_up if value < 0 else 0.5 * (err_up + err_down)
+    return value / uncertainty if uncertainty > 0 else float("nan")
 
 
 def load_table(path: Path) -> list[dict[str, object]]:
@@ -139,6 +159,7 @@ def extract_measurements(path: Path) -> dict[str, dict[str, float]]:
             "err_up": err_up,
             "err_down": err_down,
             "uncertainty": 0.5 * (err_up + err_down),
+            "sensitivity": sensitivity_value(value, err_up, err_down),
         }
     if not measurements:
         raise ValueError(f"No combined measurements could be extracted from {path}")
@@ -225,16 +246,17 @@ def main() -> None:
     csv_path = args.output_dir / "uncertainty_scaling_summary.csv"
     with csv_path.open("w", newline="") as handle:
         fields = ["input", "flag", "dataset_size", "metric", "value", "err_up",
-                  "err_down", "uncertainty", "dash_line"]
+                  "err_down", "uncertainty", "sensitivity", "dash_line"]
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
         writer.writerows(selected_rows)
 
     flags = list(dict.fromkeys(row["flag"] for row in selected_rows))
-    colors = {flag: plt.get_cmap("tab10")(index % 10) for index, flag in enumerate(flags)}
+    colors = {flag: COLORS[index % len(COLORS)] for index, flag in enumerate(flags)}
+    sensitivity_plots = 0
     for metric in metrics:
         metric_rows = [row for row in selected_rows if row["metric"] == metric]
-        fig, ax = plt.subplots(figsize=(7, 5), constrained_layout=True)
+        fig, ax = plt.subplots(figsize=(7.2, 4.2), constrained_layout=True)
         for flag in flags:
             points = sorted(
                 (row for row in metric_rows if row["flag"] == flag and not row["dash_line"]),
@@ -255,15 +277,64 @@ def main() -> None:
             if any(row["uncertainty"] <= 0 for row in metric_rows):
                 raise ValueError(f"Metric {metric!r} has non-positive uncertainty on log-y scale")
             ax.set_yscale("log")
-        ax.set(xlabel="Dataset size", ylabel="Combined uncertainty",
-               title=f"Uncertainty scaling: {metric}")
-        ax.grid(True, which="both", color="#d9d9d9", linewidth=0.7)
-        ax.legend(frameon=False)
+        ax.set(xlabel="Dataset size", ylabel="Combined uncertainty", title=metric)
+        ax.grid(axis="y", color="#d9d9d9", linewidth=0.7)
+        ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0))
         stem = args.output_dir / f"uncertainty_scaling_{safe_filename(metric)}"
-        fig.savefig(stem.with_suffix(".png"), dpi=180)
-        fig.savefig(stem.with_suffix(".pdf"))
+        fig.savefig(stem.with_suffix(".png"), dpi=600, bbox_inches="tight")
+        fig.savefig(stem.with_suffix(".pdf"), bbox_inches="tight")
+        fig.savefig(stem.with_suffix(".svg"), bbox_inches="tight")
         plt.close(fig)
-    print(f"[uncertainty-scaling] wrote {len(metrics)} PNG/PDF plot pairs and {csv_path}")
+
+        sizes = sorted({row["dataset_size"] for row in metric_rows if not row["dash_line"]})
+        normal_flags = [flag for flag in flags if any(
+            row["flag"] == flag and not row["dash_line"] for row in metric_rows
+        )]
+        if not sizes or not normal_flags:
+            continue
+        fig, ax = plt.subplots(figsize=(7.2, 4.2), constrained_layout=True)
+        width = min(0.8 / len(normal_flags), 0.28)
+        x = list(range(len(sizes)))
+        for flag_index, flag in enumerate(normal_flags):
+            by_size = {}
+            for row in metric_rows:
+                if row["flag"] != flag or row["dash_line"]:
+                    continue
+                if row["dataset_size"] in by_size:
+                    raise ValueError(
+                        f"Duplicate {metric!r} entries for flag {flag!r} at dataset size "
+                        f"{row['dataset_size']}"
+                    )
+                by_size[row["dataset_size"]] = row["sensitivity"]
+            offset = (flag_index - 0.5 * (len(normal_flags) - 1)) * width
+            positions = [position + offset for position in x]
+            values = [by_size.get(size, float("nan")) for size in sizes]
+            ax.bar(positions, values, width=width, color=colors[flag], edgecolor="#333333",
+                   linewidth=0.6, hatch=HATCHES[flag_index % len(HATCHES)], label=flag)
+        for flag in flags:
+            references = [row for row in metric_rows if row["flag"] == flag and row["dash_line"]]
+            for index, row in enumerate(references):
+                if not math.isfinite(row["sensitivity"]):
+                    continue
+                ax.axhline(row["sensitivity"], linestyle="--", linewidth=1.2,
+                           color=colors[flag], label=f"{flag} reference" if index == 0 else None)
+        ax.axhline(0.0, color="#555555", linewidth=0.8)
+        ax.set_xticks(x, [f"{size:,.0f}" for size in sizes])
+        ax.set(xlabel="Dataset size", ylabel=r"Signed sensitivity ($\sigma$)")
+        ax.set_title(f"{metric}\nValue divided by uncertainty toward zero", loc="left")
+        ax.grid(axis="y", color="#d9d9d9", linewidth=0.7, zorder=0)
+        ax.set_axisbelow(True)
+        ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0))
+        stem = args.output_dir / f"sensitivity_scaling_{safe_filename(metric)}"
+        fig.savefig(stem.with_suffix(".png"), dpi=600, bbox_inches="tight")
+        fig.savefig(stem.with_suffix(".pdf"), bbox_inches="tight")
+        fig.savefig(stem.with_suffix(".svg"), bbox_inches="tight")
+        plt.close(fig)
+        sensitivity_plots += 1
+    print(
+        f"[uncertainty-scaling] wrote {len(metrics)} uncertainty and "
+        f"{sensitivity_plots} sensitivity PNG/PDF/SVG plot sets and {csv_path}"
+    )
 
 
 if __name__ == "__main__":
