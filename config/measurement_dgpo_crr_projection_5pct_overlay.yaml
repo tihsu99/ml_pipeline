@@ -114,7 +114,8 @@ options:
 
         score_plots: false
         crr_reward_comparison: false
-        crr_input_comparison: true
+        # Requires an active score; passive physics/response plots do not.
+        crr_input_comparison: false
         crr_update_debug: false
         crr_update_debug_score_ages: []
         crr_diagnostic_refit: false
