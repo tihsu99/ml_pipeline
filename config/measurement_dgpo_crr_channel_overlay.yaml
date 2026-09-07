@@ -4,7 +4,7 @@ logger:
   wandb:
     enabled: true
     project: "DGPO-Measurement"
-    run_name: "LEP-TauNu-Crr-ScoreInputs-y_channel"
+    run_name: "LEP-TauNu-Crr-ScoreInputs-y_channel-Projection"
     tags:
       - "EveNet"
       - "LEP"
@@ -12,6 +12,7 @@ logger:
       - "adaptive-score-refresh"
       - "single-target-debug"
       - "crr-input-y_channel"
+      - "projection-reward"
     entity: ytchou97-university-of-washington
     simplified: false
 
@@ -124,6 +125,7 @@ options:
         local_epochs: 2
         timesteps: 4
         event_microbatch_size: 128
+        reward_mode: projection
 
         reward_scale: 1.0
         scale_reward_by_reference_events: true
