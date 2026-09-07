@@ -105,12 +105,12 @@ options:
         epochs: 50
         batch_size: 1024
         learning_rate: 2.0e-4
-        weight_decay: 1.0e-5
+#        weight_decay: 1.0e-5
         input_mode: target_separated
         crr_input_mode: y_channel
         on_policy_crossfit:
           enabled: true
-          epochs: 10
+          epochs: 30
 
 #        adaptive_refresh:
 #          enabled: true
