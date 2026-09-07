@@ -118,13 +118,19 @@ options:
         crr_update_debug_score_ages: []
         crr_diagnostic_refit: false
         score_refit_replicates: 0
+
+        # monitoring
         full_fisher: false
-        physics_plots: false
-        response_matrices: false
-        # Keep the independent physics measurement and useful scalar history.
+        physics_plots: true
+        physics_plot_events: 20000
+
+        response_matrices: true
+        response_matrix_events: 20000
+
         binned_measurement: true
         binned_measurement_events: null
         binned_measurement_accepted_only: false
+
         log_per_parameter_metrics: true
   Dataset:
     dataset_limit: 0.05
