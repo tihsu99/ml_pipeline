@@ -13,7 +13,7 @@ checkpoints:
     path: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis/checkpoint-pretrain-cls/last.ckpt
   diffusion:
     source: external
-    path: '/global/u2/y/yiren/Ztautau/Scaling_Law/10pct_checkpoint/dgpo-epoch=11-next_ep=12-step=120.ckpt'
+    path: '/global/u2/y/yiren/Ztautau/Scaling_Law/10pct_checkpoint/f6b4ec46_step260/dgpo-epoch=25-next_ep=26-step=260.ckpt'
 train:
   enabled: false
   srun: true
