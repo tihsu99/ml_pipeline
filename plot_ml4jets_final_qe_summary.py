@@ -166,9 +166,10 @@ def draw_panel(ax, results: dict, title: str, metrics: tuple, field: str):
     ax.set_ylabel(r"Expected sensitivity to zero [$\sigma$]" if field == "sensitivity"
                   else "Combined uncertainty")
     ax.grid(axis="y", color="0.9", linewidth=0.5)
+    ax.set_yscale("linear")
     ax.yaxis.set_major_locator(MaxNLocator(4))
     formatter = ScalarFormatter(useOffset=False)
-    formatter.set_powerlimits((-3, 3))
+    formatter.set_scientific(False)
     ax.yaxis.set_major_formatter(formatter)
     lower, upper = min(heights), max(heights)
     span = max(upper, 0) - min(lower, 0)
@@ -176,13 +177,6 @@ def draw_panel(ax, results: dict, title: str, metrics: tuple, field: str):
     ax.set_ylim(min(lower, 0) - (padding if lower < 0 else 0), max(upper, 0) + padding)
     if field == "sensitivity":
         ax.axhline(0, color="0.3", linewidth=0.7)
-    elif upper / lower > 30:
-        # A shared nonlinear physical axis retains zero and avoids invisible small bars.
-        ax.set_yscale("symlog", linthresh=lower)
-        ax.set_ylim(0, upper * 1.8)
-        ax.set_ylabel("Combined uncertainty\n(shared symlog scale)")
-        print(f"{title}: uncertainty range spans {upper / lower:.3g}x; using a common "
-              f"physical symlog axis, linear below {lower:.3g}. No per-parameter rescaling.")
 
 
 def make_figures(results: dict, output_dir: Path, formats: list[str], dpi: int) -> list[Path]:
