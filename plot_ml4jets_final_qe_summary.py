@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """Final ML4Jets Asimov QI summaries from already-combined fit results.
 
-Read only the five requested budget/method combinations from the existing
-uncertainty_scaling YAML. Other budgets are excluded before their files are
+Read only the five requested training dataset size/method combinations from the existing
+uncertainty_scaling YAML. Other dataset sizes are excluded before their files are
 opened. Relative result paths are relative to that YAML, as in the existing
 plotter. No fit, channel combination, or result-file modification is performed.
 
 Precision is (err_up + err_down) / 2. Concurrence signed sensitivity uses the
 existing value / uncertainty-toward-zero implementation. Ratios are DGPO /
-baseline precision, not significance ratios. Budget controls color; only hatch
+baseline precision, not significance ratios. Training dataset size controls color; only hatch
 distinguishes DGPO. B_Ak, B_An, B_Ar are displayed as B_k, B_n, B_r.
 
 The five figures are exported in PNG/PDF/SVG by default. The console lists all
-outputs, the seven precision ratios at each reduced budget, and a rerun command.
+outputs, the seven precision ratios at each reduced dataset size, and a rerun command.
 Run --self-test for a small check of selection and asymmetric metric handling.
 """
 
@@ -36,8 +36,8 @@ from plot_uncertainty_scaling import extract_measurements, sensitivity_value
 
 
 # Isolate the talk's scientific selection and styling from the plotting code.
-BUDGETS = (50_000, 250_000, 5_000_000)
-BUDGET_LABELS = {50_000: "1%", 250_000: "5%", 5_000_000: "100% (5M)"}
+DATASET_SIZES = (50_000, 250_000, 5_000_000)
+DATASET_SIZE_LABELS = {50_000: "1%", 250_000: "5%", 5_000_000: "100% (5M)"}
 COLORS = {50_000: "#B98968", 250_000: "#8196AE", 5_000_000: "#62656B"}
 SERIES = ((50_000, "Baseline"), (50_000, "DGPO"),
           (250_000, "Baseline"), (250_000, "DGPO"), (5_000_000, "Baseline"))
@@ -66,11 +66,11 @@ STYLE = {
 
 def series_label(series):
     size, method = series
-    return f"{BUDGET_LABELS[size]} {method}"
+    return f"{DATASET_SIZE_LABELS[size]} {method}"
 
 
 def selected_inputs(config: dict) -> dict:
-    """Filter before checking paths, so excluded budget files are never needed."""
+    """Filter before checking paths, so excluded dataset-size files are never needed."""
     selected = {}
     for name, item in config.items():
         if not isinstance(item, dict):
@@ -127,7 +127,7 @@ def load_results(config_path: Path) -> dict:
 
 def legends_and_note(fig, combined=False):
     colors = [Patch(facecolor=COLORS[size], edgecolor="0.25", linewidth=0.5,
-                    label=BUDGET_LABELS[size]) for size in BUDGETS]
+                    label=DATASET_SIZE_LABELS[size]) for size in DATASET_SIZES]
     methods = [Patch(facecolor="white", edgecolor="0.25", linewidth=0.5,
                      hatch="///" if method == "DGPO" else "", label=method)
                for method in ("Baseline", "DGPO")]
@@ -146,8 +146,8 @@ def draw_panel(ax, results: dict, title: str, metrics: tuple, field: str):
     for index, (size, method) in enumerate(SERIES):
         values = [results[(size, method)][metric][field] for metric in metrics]
         if metrics == ("Concurrence",):
-            positions = [BUDGETS.index(size) + ({"Baseline": -0.18, "DGPO": 0.18}[method]
-                                              if size != BUDGETS[-1] else 0)]
+            positions = [DATASET_SIZES.index(size) + ({"Baseline": -0.18, "DGPO": 0.18}[method]
+                                              if size != DATASET_SIZES[-1] else 0)]
             width = 0.32
         else:
             positions = np.arange(len(metrics)) + (index - 2) * 0.15
@@ -158,8 +158,8 @@ def draw_panel(ax, results: dict, title: str, metrics: tuple, field: str):
             ax.bar_label(bars, labels=[f"{value:.3g}" for value in values], padding=3, fontsize=8)
         heights.extend(values)
     if metrics == ("Concurrence",):
-        ax.set_xticks(range(3), [BUDGET_LABELS[size] for size in BUDGETS])
-        ax.set_xlabel("Training budget")
+        ax.set_xticks(range(3), [DATASET_SIZE_LABELS[size] for size in DATASET_SIZES])
+        ax.set_xlabel("Training dataset size")
     else:
         ax.set_xticks(range(len(metrics)), [MATH_LABELS[metric] for metric in metrics])
     ax.set_title(title, loc="left", pad=9)
@@ -217,7 +217,7 @@ def print_ratios(results):
     print(f"{'Parameter':<15} {'1%':>10} {'5%':>10}")
     for metric, label in zip(PARAMETERS, PARAMETER_LABELS):
         ratios = [results[(size, "DGPO")][metric]["uncertainty"] /
-                  results[(size, "Baseline")][metric]["uncertainty"] for size in BUDGETS[:2]]
+                  results[(size, "Baseline")][metric]["uncertainty"] for size in DATASET_SIZES[:2]]
         print(f"{label:<15} {ratios[0]:>10.4f} {ratios[1]:>10.4f}")
 
 
