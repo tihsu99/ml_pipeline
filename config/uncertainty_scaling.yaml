@@ -22,12 +22,12 @@ DGPO_50k:
 baseline_250k:
   dataset_size: 250000
   flag: Baseline
-  path: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis_method/baseline_0p05/qi/evenet/run/ForwardFoldingProcessor_asimovdata/results.txt
+  path: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis_method/baseline/qi/evenet/run/ForwardFoldingProcessor_asimovdata/results.txt
 
 DGPO_250k:
   dataset_size: 250000
   flag: DGPO
-  path: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis_method/DGPO_0p05/qi/evenet/run/ForwardFoldingProcessor_asimovdata/results.txt
+  path: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis_method/DGPO/qi/evenet/run/ForwardFoldingProcessor_asimovdata/results.txt
 
 # 10% dataset (total 5 M)
 baseline_500k:
