@@ -108,6 +108,36 @@ def split_event_ranges(num_events: int, num_chunks: int) -> list[tuple[int, int]
     edges = np.linspace(0, num_events, num_chunks + 1, dtype=int)
     return [(int(edges[i]), int(edges[i + 1])) for i in range(num_chunks) if int(edges[i + 1]) > int(edges[i])]
 
+def load_merge_tasks(converted_parquets: list[str], output_dir: Path) -> list[InferenceTask]:
+    # Reuse the prediction plan; CPU/GPU availability must not change its ranges.
+    manifest_path = output_dir / "prediction_manifest.json"
+    with manifest_path.open() as handle:
+        manifest = json.load(handle)
+    selected_inputs = {str(Path(path).resolve()) for path in converted_parquets}
+    tasks = []
+    for record in manifest["tasks"]:
+        input_path = Path(record["input_path"]).resolve()
+        if str(input_path) not in selected_inputs:
+            continue
+        output_name = Path(record["output_path"]).name
+        prefix = f"{input_path.stem}__evenet_pred.part"
+        if not (output_name.startswith(prefix) and output_name.endswith(".parquet")
+                and output_name[len(prefix):-len(".parquet")].isdigit()):
+            raise ValueError(f"Invalid prediction part in {manifest_path}: {output_name}")
+        tasks.append(InferenceTask(
+            sample_name=input_path.stem,
+            input_path=str(input_path),
+            # Output directories may have been renamed since prediction.
+            output_path=str(output_dir / output_name),
+            event_start=record["event_start"],
+            event_stop=record["event_stop"],
+            final_output_path=str(output_dir / f"{input_path.stem}__evenet_pred.parquet"),
+        ))
+    missing_inputs = selected_inputs - {task.input_path for task in tasks}
+    if missing_inputs:
+        raise ValueError(f"Prediction manifest has no tasks for: {sorted(missing_inputs)}")
+    return tasks
+
 def merge_converted_chunk_outputs(tasks: list[InferenceTask], delete_parts: bool = False) -> None:
     grouped_tasks: dict[str, list[InferenceTask]] = {}
     for task in tasks:
@@ -115,25 +145,45 @@ def merge_converted_chunk_outputs(tasks: list[InferenceTask], delete_parts: bool
         grouped_tasks.setdefault(final_output_path, []).append(task)
 
     for final_output_path, group in grouped_tasks.items():
-        if len(group) == 1 and group[0].output_path == final_output_path:
-            continue
-
-        chunk_paths = [Path(task.output_path) for task in sorted(group, key=lambda item: item.event_start or 0)]
+        group = sorted(group, key=lambda item: item.event_start or 0)
+        expected_rows = parquet_num_rows(Path(group[0].input_path))
+        cursor = 0
+        for task in group:
+            if (task.input_path != group[0].input_path or task.event_start != cursor
+                    or task.event_stop is None or task.event_stop < cursor):
+                raise ValueError(f"Non-contiguous prediction ranges for {final_output_path}")
+            cursor = task.event_stop
+        if cursor != expected_rows:
+            raise ValueError(
+                f"Incomplete prediction plan for {final_output_path}: {cursor}/{expected_rows} rows"
+            )
+        chunk_paths = [Path(task.output_path) for task in group]
+        if len(set(chunk_paths)) != len(chunk_paths):
+            raise ValueError(f"Duplicate prediction parts for {final_output_path}")
         final_path = Path(final_output_path)
         missing_chunk_paths = [chunk_path for chunk_path in chunk_paths if not chunk_path.exists()]
         if missing_chunk_paths:
-            if final_path.exists():
+            if (len(missing_chunk_paths) == len(chunk_paths) and final_path.exists()
+                    and parquet_num_rows(final_path) == expected_rows):
                 print(
-                    f"[converted-merge] skipped {final_path}; final output already exists "
-                    f"and {len(missing_chunk_paths)}/{len(chunk_paths)} chunk(s) are absent",
+                    f"[converted-merge] skipped {final_path}; complete final output exists "
+                    "and all parts have already been removed",
                     flush=True,
                 )
                 continue
             missing_preview = ", ".join(str(path) for path in missing_chunk_paths[:5])
             raise FileNotFoundError(
                 f"Cannot merge {final_path}; missing {len(missing_chunk_paths)}/{len(chunk_paths)} chunk file(s): "
-                f"{missing_preview}"
+                f"{missing_preview}. Regenerate the missing prediction parts; "
+                "an existing final file cannot substitute for them."
             )
+        for task, chunk_path in zip(group, chunk_paths):
+            actual_rows = parquet_num_rows(chunk_path)
+            if actual_rows != task.event_stop - task.event_start:
+                raise ValueError(
+                    f"Incomplete prediction part {chunk_path}: {actual_rows} rows; "
+                    f"expected {task.event_stop - task.event_start}"
+                )
         arrays = [ak.from_parquet(chunk_path) for chunk_path in chunk_paths]
         merged = ak.concatenate(arrays, axis=0) if len(arrays) > 1 else arrays[0]
         if "event_index" in merged.fields:
@@ -141,7 +191,16 @@ def merge_converted_chunk_outputs(tasks: list[InferenceTask], delete_parts: bool
             merged = merged[order]
 
         final_path.parent.mkdir(parents=True, exist_ok=True)
-        ak.to_parquet(merged, final_path)
+        # Never truncate an existing final output if writing the merge fails.
+        with tempfile.NamedTemporaryFile(dir=final_path.parent, suffix=".parquet", delete=False) as handle:
+            temporary_path = Path(handle.name)
+        try:
+            ak.to_parquet(merged, temporary_path)
+            if parquet_num_rows(temporary_path) != expected_rows:
+                raise ValueError(f"Merged row count does not match input for {final_path}")
+            os.replace(temporary_path, final_path)
+        finally:
+            temporary_path.unlink(missing_ok=True)
         print(f"[converted-merge] wrote {final_path} from {len(chunk_paths)} chunk(s)", flush=True)
 
         if delete_parts:
@@ -967,6 +1026,19 @@ def main() -> None:
     converted_split_fraction = args.converted_split_fraction
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    if args.merge_only:
+        if args.task_num_shards > 1 and args.task_shard_index != 0:
+            print(
+                f"[converted-merge] skipped on shard {args.task_shard_index}; "
+                "run merge once from shard 0 to avoid duplicate merge work",
+                flush=True,
+            )
+            return
+        merge_converted_chunk_outputs(
+            load_merge_tasks(converted_parquets, output_dir), delete_parts=args.delete_merged_parts,
+        )
+        return
+
     use_cuda = torch.cuda.is_available() and args.num_gpus > 0
     num_workers = min(args.num_gpus, torch.cuda.device_count()) if use_cuda else 1
     chunks_per_file = infer_chunks_per_file(args, num_workers)
@@ -976,17 +1048,6 @@ def main() -> None:
         num_chunks_per_file=chunks_per_file,
         max_events_per_chunk=args.batch_size if args.chunks_per_file is None else None,
     )
-
-    if args.merge_only:
-        if args.task_num_shards > 1 and args.task_shard_index != 0:
-            print(
-                f"[converted-merge] skipped on shard {args.task_shard_index}; "
-                "run merge once from shard 0 to avoid duplicate merge work",
-                flush=True,
-            )
-            return
-        merge_converted_chunk_outputs(all_tasks, delete_parts=args.delete_merged_parts)
-        return
 
     runtime_train_config = prepare_runtime_train_config(
         train_config_path=args.train_config.resolve(),

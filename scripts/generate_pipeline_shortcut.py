@@ -229,6 +229,10 @@ def _validate_predict(
             raise ConfigError(f"checkpoints.{role} is required when predict is enabled.")
     options = _mapping(stage_data.get("options", {}), "predict.options")
     stage_data["options"] = options
+    # Use live diffusion weights by default; YAML can explicitly opt back into EMA.
+    options.setdefault("disable_ema", True)
+    if not isinstance(options["disable_ema"], bool):
+        raise ConfigError("predict.options.disable_ema must be true or false.")
     reserved = PREDICT_RESERVED_OPTIONS.intersection(options)
     if reserved:
         names = ", ".join(sorted(reserved))
