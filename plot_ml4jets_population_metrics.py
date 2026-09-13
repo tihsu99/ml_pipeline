@@ -333,28 +333,38 @@ def make_joint_plots(rows, w1_rows, diagnostic, config, output, formats, dpi):
             subtitle += "\nBars: bootstrap median; intervals: 16–84%"
         fig.suptitle(subtitle, fontsize=10)
         save(fig, "ml4jets_population_swd")
-        variables = [f"{leg}:{feature}" for leg in config["legs"] for feature in config["features"]]
-        fig, ax = plt.subplots(figsize=(max(6, len(variables)*1.5), 3.5), layout="constrained")
-        for i, size in enumerate(sizes):
-            group = [row for row in w1_rows if row["dataset_size"] == size and row["flag"] == "DGPO"]
-            xs, ys = [], []
-            for row in group:
-                if row["relative_change"] is not None:
-                    xs.append(variables.index(f'{row["leg"]}:{row["feature"]}') + (i-(len(sizes)-1)/2)*0.65/len(sizes))
-                    ys.append(100*row["relative_change"])
-            if xs:
-                ax.scatter(xs, ys, color=colors[size], label=labels[size])
-        ax.axhline(0, color="0.5", linestyle="--", linewidth=1)
-        names = [config.get("feature_labels", {}).get(feature, feature) + f" · leg {leg}"
-                 for leg in config["legs"] for feature in config["features"]]
-        ax.set_xticks(range(len(variables)), names)
-        ax.set_ylabel(r"$(W_{1,\mathrm{DGPO}}-W_{1,\mathrm{Baseline}})/W_{1,\mathrm{Baseline}}$ [%]")
-        ax.set_title("Marginal population agreement · negative = improvement")
-        if ax.collections:
-            ax.legend(title="Training dataset size", fontsize=8)
-        else:
-            ax.text(0.5,0.5,"No paired Baseline/DGPO datasets",transform=ax.transAxes,ha="center")
-        ax.grid(axis="y", color="0.92")
+        variables = [(leg, feature) for leg in config["legs"] for feature in config["features"]]
+        columns = min(2, len(variables))
+        fig, axes = plt.subplots((len(variables)+columns-1)//columns, columns,
+                                 figsize=(max(4.5, len(sizes)*1.15)*columns,
+                                          3.4*((len(variables)+columns-1)//columns)),
+                                 squeeze=False, layout="constrained")
+        for ax, (leg, feature) in zip(axes.flat, variables):
+            for i, size in enumerate(sizes):
+                group = [row for row in w1_rows if row["dataset_size"] == size
+                         and (row["leg"], row["feature"]) == (leg, feature)]
+                for row in group:
+                    offset = (0.18 if row["flag"] == "DGPO" else -0.18) if len(group)>1 else 0
+                    bars = ax.bar(i+offset, row["w1"], width=0.32, color=colors[size],
+                                  edgecolor="0.25", linewidth=0.6,
+                                  hatch="///" if row["flag"] == "DGPO" else "")
+                    ax.bar_label(bars, labels=[f'{row["w1"]:.3g}'], padding=3, fontsize=8)
+            label = config.get("feature_labels", {}).get(feature, feature)
+            ax.set_title(f"{label} · leg {leg}")
+            ax.set_ylabel(r"Population $W_1$" + (" [rad]" if feature in ("theta", "phi") else ""))
+            ax.set_xlabel("Training dataset size")
+            ax.set_xticks(range(len(sizes)), list(labels.values()))
+            ax.set_ylim(0, ax.get_ylim()[1]*1.2)
+            ax.grid(axis="y", color="0.92")
+            ax.set_axisbelow(True)
+            formatter = ScalarFormatter(useOffset=False)
+            formatter.set_scientific(False)
+            ax.yaxis.set_major_formatter(formatter)
+        for ax in list(axes.flat)[len(variables):]:
+            ax.set_visible(False)
+        axes.flat[0].legend(handles=[Patch(facecolor="white", edgecolor="0.3", hatch=hatch, label=label)
+                                    for label, hatch in [("Baseline", ""), ("DGPO", "///")]], fontsize=8)
+        fig.suptitle("Marginal population agreement", fontsize=11)
         save(fig, "ml4jets_population_w1")
         pair = config.get("joint", {}).get("diagnostic_pair")
         if pair:
@@ -497,9 +507,6 @@ def main():
     for row in rows:
         base = next((other for other in rows if other["dataset_size"]==row["dataset_size"] and other["flag"]=="Baseline"
                      and (other["leg"],other["feature"])==(row["leg"],row["feature"])),None)
-        reference = base["w1"] if base else None
-        row["ratio_to_baseline"] = row["w1"]/reference if reference and reference>0 else None
-        row["relative_change"] = row["ratio_to_baseline"]-1 if row["ratio_to_baseline"] is not None else None
         if base:
             left,right = truth_samples[base["method"]][(row["leg"],row["feature"])],truth_samples[row["method"]][(row["leg"],row["feature"])]
             row["truth_population_w1_to_baseline"] = wasserstein1(left.target,right.target,left.weight,right.weight)
@@ -521,7 +528,7 @@ def main():
                "w1":rows,"joint_metrics":joint_rows,"joint":joint_metadata,"tarp":tarp_rows,
                "w1_definition":"exact linear empirical W1 with configured event weights; circular phi W1 retained as an additional diagnostic",
                "w1_sampling":"same per-leg event count within each training size, deterministic paired truth/prediction subsampling",
-               "relative_change_definition":"(DGPO-Baseline)/Baseline; negative is improvement; null for absent/zero baseline",
+               "relative_change_definition":"SWD metrics only: (DGPO-Baseline)/Baseline; negative is improvement; null for absent/zero baseline",
                "tarp_status":{name:"computed" if item.get("posterior_npz") else "unavailable: one candidate per event"
                               for name,item in config["methods"].items()}, "outputs":outputs}
     (output/"population_metrics.json").write_text(json.dumps(summary,indent=2,allow_nan=False)+"\n")
