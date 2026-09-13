@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Final ML4Jets Asimov QI summaries from already-combined fit results.
 
-Read only the five requested training dataset size/method combinations from the existing
-uncertainty_scaling YAML. Other dataset sizes are excluded before their files are
-opened. Relative result paths are relative to that YAML, as in the existing
-plotter. No fit, channel combination, or result-file modification is performed.
+Read all Baseline/DGPO entries from the uncertainty_scaling YAML, ordered by
+dataset_size and method. Add or remove YAML entries to select the plotted series.
+plot.full_dataset_size sets the denominator for percentage labels; when omitted,
+the largest configured dataset size is used. Relative result paths are relative
+to that YAML, as in the existing plotter. No fit, channel combination, or result-file modification is performed.
 
 Precision is (err_up + err_down) / 2. Concurrence signed sensitivity uses the
 existing value / uncertainty-toward-zero implementation. Ratios are DGPO /
@@ -12,7 +13,7 @@ baseline precision, not significance ratios. Training dataset size controls colo
 distinguishes DGPO. B_Ak, B_An, B_Ar are displayed as B_k, B_n, B_r.
 
 The five figures are exported in PNG/PDF/SVG by default. The console lists all
-outputs, the seven precision ratios at each reduced dataset size, and a rerun command.
+outputs, the seven precision ratios at each paired dataset size, and a rerun command.
 Run --self-test for a small check of selection and asymmetric metric handling.
 """
 
@@ -35,12 +36,8 @@ import yaml
 from plot_uncertainty_scaling import extract_measurements, sensitivity_value
 
 
-# Isolate the talk's scientific selection and styling from the plotting code.
-DATASET_SIZES = (50_000, 250_000, 5_000_000)
-DATASET_SIZE_LABELS = {50_000: "1%", 250_000: "5%", 5_000_000: "100% (5M)"}
-COLORS = {50_000: "#B98968", 250_000: "#8196AE", 5_000_000: "#62656B"}
-SERIES = ((50_000, "Baseline"), (50_000, "DGPO"),
-          (250_000, "Baseline"), (250_000, "DGPO"), (5_000_000, "Baseline"))
+# Keep the scientific panels and styling separate from YAML-selected inputs.
+COLORS = ("#B98968", "#8196AE", "#8F9F88", "#B69AB0", "#C2AE73", "#62656B")
 PARAMETERS = ("Concurrence", "B_Ak", "B_An", "B_Ar", "Ckk", "Cnn", "Crr")
 PARAMETER_LABELS = ("Concurrence", "B_k", "B_n", "B_r", "C_kk", "C_nn", "C_rr")
 FIGURES = (
@@ -64,29 +61,39 @@ STYLE = {
 }
 
 
+def dataset_size_label(size, full_dataset_size):
+    count = f"{size / 1_000_000:g}M" if size >= 1_000_000 else f"{size:g}"
+    percentage = f"{100 * size / full_dataset_size:g}%"
+    return f"{percentage} ({count})" if size == full_dataset_size else percentage
+
+
 def series_label(series):
     size, method = series
-    return f"{DATASET_SIZE_LABELS[size]} {method}"
+    return f"{size:g} events {method}"
 
 
 def selected_inputs(config: dict) -> dict:
-    """Filter before checking paths, so excluded dataset-size files are never needed."""
+    """Use every configured result entry; never silently discard a dataset size."""
     selected = {}
     for name, item in config.items():
+        if name in {"metrics", "plot"}:
+            continue
         if not isinstance(item, dict):
-            continue
+            raise ValueError(f"Input {name!r} must be a mapping")
         size = item.get("dataset_size")
-        method = str(item.get("flag", "")).strip().lower()
-        key = (size, {"baseline": "Baseline", "dgpo": "DGPO"}.get(method))
-        if key not in SERIES:
-            continue
+        if (isinstance(size, bool) or not isinstance(size, (int, float))
+                or not math.isfinite(size) or size <= 0):
+            raise ValueError(f"Input {name!r} requires a positive finite dataset_size")
+        method = {"baseline": "Baseline", "dgpo": "DGPO"}.get(str(item.get("flag", "")).strip().lower())
+        if method is None:
+            raise ValueError(f"Input {name!r} requires flag: Baseline or DGPO")
+        key = (size, method)
         if key in selected:
             raise ValueError(f"Duplicate configuration for {series_label(key)}: {name}.")
         selected[key] = (name, item)
-    missing = [series_label(key) for key in SERIES if key not in selected]
-    if missing:
-        raise ValueError("Missing required configurations: " + ", ".join(missing))
-    return selected
+    if not selected:
+        raise ValueError("Config contains no result inputs")
+    return dict(sorted(selected.items()))
 
 
 def load_results(config_path: Path) -> dict:
@@ -95,8 +102,7 @@ def load_results(config_path: Path) -> dict:
         raise ValueError("The config must be a YAML mapping.")
     selected = selected_inputs(config)
     results, errors = {}, []
-    for key in SERIES:
-        name, item = selected[key]
+    for key, (name, item) in selected.items():
         raw_path = item.get("path")
         if not isinstance(raw_path, str) or not raw_path.strip():
             errors.append(f"{series_label(key)} ({name}): missing result path")
@@ -125,40 +131,41 @@ def load_results(config_path: Path) -> dict:
     return results
 
 
-def legends_and_note(fig, combined=False):
-    colors = [Patch(facecolor=COLORS[size], edgecolor="0.25", linewidth=0.5,
-                    label=DATASET_SIZE_LABELS[size]) for size in DATASET_SIZES]
+def legends_and_note(fig, results, labels, colors):
+    color_handles = [Patch(facecolor=colors[size], edgecolor="0.25", linewidth=0.5,
+                           label=label) for size, label in labels.items()]
     methods = [Patch(facecolor="white", edgecolor="0.25", linewidth=0.5,
                      hatch="///" if method == "DGPO" else "", label=method)
-               for method in ("Baseline", "DGPO")]
-    # Separate keys for the two independent visual encodings.
-    if combined:
-        fig.legend(handles=colors, loc="upper center", bbox_to_anchor=(0.34, 0.99), ncol=3)
-        fig.legend(handles=methods, loc="upper center", bbox_to_anchor=(0.71, 0.99), ncol=2)
-    else:
-        fig.legend(handles=colors, loc="upper center", bbox_to_anchor=(0.53, 0.99), ncol=3)
-        fig.legend(handles=methods, loc="upper center", bbox_to_anchor=(0.53, 0.91), ncol=2)
+               for method in ("Baseline", "DGPO") if any(key[1] == method for key in results)]
+    fig.legend(handles=color_handles, loc="upper center", bbox_to_anchor=(0.53, 0.99),
+               ncol=min(len(labels), 4))
+    rows = math.ceil(len(labels) / 4)
+    fig.legend(handles=methods, loc="upper center", bbox_to_anchor=(0.53, 0.99 - rows * 0.065), ncol=2)
     fig.text(0.5, 0.025, "Expected Asimov performance", ha="center", color="0.4", fontsize=7)
 
 
-def draw_panel(ax, results: dict, title: str, metrics: tuple, field: str):
+def draw_panel(ax, results: dict, title: str, metrics: tuple, field: str, labels, colors):
     heights = []
-    for index, (size, method) in enumerate(SERIES):
+    sizes = list(labels)
+    series = sorted(results)
+    for index, (size, method) in enumerate(series):
         values = [results[(size, method)][metric][field] for metric in metrics]
         if metrics == ("Concurrence",):
-            positions = [DATASET_SIZES.index(size) + ({"Baseline": -0.18, "DGPO": 0.18}[method]
-                                              if size != DATASET_SIZES[-1] else 0)]
+            paired = all((size, name) in results for name in ("Baseline", "DGPO"))
+            offset = {"Baseline": -0.18, "DGPO": 0.18}[method] if paired else 0
+            positions = [sizes.index(size) + offset]
             width = 0.32
         else:
-            positions = np.arange(len(metrics)) + (index - 2) * 0.15
-            width = 0.135
-        bars = ax.bar(positions, values, width=width, color=COLORS[size],
+            spacing = 0.75 / len(series)
+            positions = np.arange(len(metrics)) + (index - (len(series) - 1) / 2) * spacing
+            width = spacing * 0.9
+        bars = ax.bar(positions, values, width=width, color=colors[size],
                       edgecolor="0.2", linewidth=0.55, hatch="///" if method == "DGPO" else "")
         if metrics == ("Concurrence",):
             ax.bar_label(bars, labels=[f"{value:.3g}" for value in values], padding=3, fontsize=8)
         heights.extend(values)
     if metrics == ("Concurrence",):
-        ax.set_xticks(range(3), [DATASET_SIZE_LABELS[size] for size in DATASET_SIZES])
+        ax.set_xticks(range(len(sizes)), list(labels.values()))
         ax.set_xlabel("Training dataset size")
     else:
         ax.set_xticks(range(len(metrics)), [MATH_LABELS[metric] for metric in metrics])
@@ -179,7 +186,16 @@ def draw_panel(ax, results: dict, title: str, metrics: tuple, field: str):
         ax.axhline(0, color="0.3", linewidth=0.7)
 
 
-def make_figures(results: dict, output_dir: Path, formats: list[str], dpi: int) -> list[Path]:
+def make_figures(results: dict, output_dir: Path, formats: list[str], dpi: int,
+                 full_dataset_size=None) -> list[Path]:
+    sizes = sorted({size for size, _ in results})
+    full_dataset_size = full_dataset_size or max(sizes)
+    labels = {size: dataset_size_label(size, full_dataset_size) for size in sizes}
+    palette = [COLORS[index % (len(COLORS) - 1)] for index in range(len(sizes))]
+    colors = dict(zip(sizes, palette))
+    if full_dataset_size in colors:
+        colors[full_dataset_size] = COLORS[-1]
+    legend_extra = max(0, math.ceil(len(sizes) / 4) - 1) * 0.065
     output_dir.mkdir(parents=True, exist_ok=True)
     outputs = []
 
@@ -192,45 +208,89 @@ def make_figures(results: dict, output_dir: Path, formats: list[str], dpi: int) 
 
     with plt.rc_context(STYLE):
         for stem, title, metrics, field in FIGURES:
-            fig, ax = plt.subplots(figsize=(4.8, 3.6))
-            fig.subplots_adjust(left=0.17, right=0.97, bottom=0.19, top=0.73)
-            draw_panel(ax, results, title, metrics, field)
-            legends_and_note(fig)
+            fig, ax = plt.subplots(figsize=(max(4.8, len(sizes) * 1.1), 3.6))
+            fig.subplots_adjust(left=0.17, right=0.97, bottom=0.19, top=0.73 - legend_extra)
+            draw_panel(ax, results, title, metrics, field, labels, colors)
+            legends_and_note(fig, results, labels, colors)
             save(fig, stem)
-        fig, axes = plt.subplots(1, 3, figsize=(11.8, 3.5))
-        fig.subplots_adjust(left=0.07, right=0.99, bottom=0.2, top=0.79, wspace=0.42)
+        fig, axes = plt.subplots(1, 3, figsize=(max(11.8, len(sizes) * 2.5), 3.5))
+        fig.subplots_adjust(left=0.07, right=0.99, bottom=0.2, top=0.73 - legend_extra, wspace=0.42)
         for letter, ax, (_, title, metrics, field) in zip("abc", axes, (FIGURES[0], FIGURES[2], FIGURES[3])):
-            draw_panel(ax, results, f"({letter}) {title}", metrics, field)
-        legends_and_note(fig, combined=True)
+            draw_panel(ax, results, f"({letter}) {title}", metrics, field, labels, colors)
+        legends_and_note(fig, results, labels, colors)
         save(fig, "ml4jets_qe_summary_3panel")
     return outputs
 
 
-def print_ratios(results):
+def print_ratios(results, full_dataset_size=None):
+    sizes = sorted({size for size, _ in results})
+    full_dataset_size = full_dataset_size or max(sizes)
+    paired = [size for size in sizes if all((size, method) in results for method in ("Baseline", "DGPO"))]
     print("\nCombined uncertainty ratios: DGPO / baseline")
-    print(f"{'Parameter':<15} {'1%':>10} {'5%':>10}")
+    if not paired:
+        print("No dataset sizes have both Baseline and DGPO results.")
+        return
+    print(f"{'Parameter':<15}" + "".join(f"{dataset_size_label(size, full_dataset_size):>14}" for size in paired))
     for metric, label in zip(PARAMETERS, PARAMETER_LABELS):
         ratios = [results[(size, "DGPO")][metric]["uncertainty"] /
-                  results[(size, "Baseline")][metric]["uncertainty"] for size in DATASET_SIZES[:2]]
-        print(f"{label:<15} {ratios[0]:>10.4f} {ratios[1]:>10.4f}")
+                  results[(size, "Baseline")][metric]["uncertainty"] for size in paired]
+        print(f"{label:<15}" + "".join(f"{ratio:>14.4f}" for ratio in ratios))
 
 
 def self_test():
-    config = {str(index): {"dataset_size": size, "flag": method, "path": "unused"}
-              for index, (size, method) in enumerate(SERIES)}
-    config["excluded"] = {"dataset_size": 500_000, "flag": "Baseline", "path": "absent"}
-    assert tuple(selected_inputs(config)) == SERIES
-    assert sensitivity_value(2, 4, 0.5) == 4
-    assert sensitivity_value(-2, 4, 0.5) == -0.5
-    assert sensitivity_value(0, 4, 0.5) == 0
-    del config["1"]
+    from contextlib import redirect_stdout
+    from io import StringIO
+    import tempfile
+
+    series = ((50_000, "Baseline"), (50_000, "DGPO"), (250_000, "Baseline"),
+              (250_000, "DGPO"), (500_000, "Baseline"), (500_000, "DGPO"),
+              (5_000_000, "Baseline"), (5_000_000, "DGPO"))
+    config = {str(index): {"dataset_size": size, "flag": method, "path": "results.txt"}
+              for index, (size, method) in enumerate(reversed(series))}
+    assert tuple(selected_inputs(config)) == series
+    assert dataset_size_label(500_000, 5_000_000) == "10%"
+    assert dataset_size_label(100_000, 5_000_000) == "2%"
+    config["duplicate"] = config["0"]
     try:
         selected_inputs(config)
     except ValueError as exc:
-        assert "1% DGPO" in str(exc)
+        assert "Duplicate" in str(exc)
     else:
-        raise AssertionError("Missing 1% DGPO was not rejected")
-    print("Self-test passed: exact five-series selection, required DGPO, signed asymmetric sensitivity.")
+        raise AssertionError("Duplicate input was accepted")
+    del config["duplicate"]
+    assert sensitivity_value(2, 4, 0.5) == 4
+    assert sensitivity_value(-2, 4, 0.5) == -0.5
+    assert sensitivity_value(0, 4, 0.5) == 0
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        config_path = root / "config.yaml"
+        config_path.write_text(yaml.safe_dump(config))
+        result_path = root / "results.txt"
+        result_path.write_text("Combined fit regions: test\n" + "\n".join(
+            f"{metric} 0.5 +0.2 -0.1" for metric in PARAMETERS))
+        results = load_results(config_path)
+        assert tuple(results) == series
+        assert math.isclose(results[(500_000, "DGPO")]["Concurrence"]["uncertainty"], 0.15)
+        labels = {size: dataset_size_label(size, 5_000_000) for size, _ in series}
+        colors = dict.fromkeys(labels, "gray")
+        fig, ax = plt.subplots()
+        draw_panel(ax, results, "test", ("Concurrence",), "uncertainty", labels, colors)
+        assert len(ax.patches) == len(series)
+        assert [tick.get_text() for tick in ax.get_xticklabels()] == ["1%", "5%", "10%", "100% (5M)"]
+        assert ax.get_yscale() == "linear"
+        plt.close(fig)
+        output = StringIO()
+        with redirect_stdout(output):
+            print_ratios(results, 5_000_000)
+        assert "10%" in output.getvalue()
+        result_path.write_text("Region: test\nConcurrence 0.5 +0.2 -0.1\n")
+        try:
+            load_results(config_path)
+        except ValueError as exc:
+            assert "No figures written" in str(exc)
+        else:
+            raise AssertionError("Per-channel results were accepted as combined")
+    print("Self-test passed: YAML selection including 10%, full-size DGPO, parsing, bars, ratios, validation.")
 
 
 def main():
@@ -251,14 +311,22 @@ def main():
     args.config = args.config.expanduser().resolve()
     args.output_dir = args.output_dir.expanduser().resolve()
     try:
+        config = yaml.safe_load(args.config.read_text())
+        if not isinstance(config, dict) or not isinstance(config.get("plot", {}), dict):
+            raise ValueError("The config and plot options must be YAML mappings")
+        full_dataset_size = config.get("plot", {}).get("full_dataset_size")
+        if full_dataset_size is not None and (
+                isinstance(full_dataset_size, bool) or not isinstance(full_dataset_size, (int, float))
+                or not math.isfinite(full_dataset_size) or full_dataset_size <= 0):
+            raise ValueError("plot.full_dataset_size must be a positive finite number")
         results = load_results(args.config)
     except (ValueError, OSError, yaml.YAMLError) as exc:
         parser.exit(2, f"Error: {exc}\n")
-    outputs = make_figures(results, args.output_dir, list(dict.fromkeys(args.formats)), args.dpi)
+    outputs = make_figures(results, args.output_dir, list(dict.fromkeys(args.formats)), args.dpi, full_dataset_size)
     print("\nGenerated files:")
     for path in outputs:
         print(path)
-    print_ratios(results)
+    print_ratios(results, full_dataset_size)
     print("\nRun command:\n" + shlex.join([
         "python3", str(Path(__file__).resolve()), "--config", str(args.config),
         "--output-dir", str(args.output_dir), "--formats", *args.formats, "--dpi", str(args.dpi),
