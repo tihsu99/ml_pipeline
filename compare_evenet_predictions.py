@@ -210,7 +210,15 @@ def load_method(
     weight_column: str | None,
     max_events: int | None,
     target_source: str,
-) -> tuple[dict[tuple[str, str], FeatureSample], int, list[str], list[str]]:
+    *,
+    return_joint: bool = False,
+):
+    """Load the existing per-leg samples; optionally append a common-event matrix.
+
+    The fifth return value uses leg-major, feature-minor column order and the
+    intersection of all requested leg/feature validity masks. Default callers
+    retain their original four return values and per-leg selection.
+    """
     import pyarrow.parquet as pq
 
     feature_index = {name: index for index, name in enumerate(all_features)}
@@ -220,6 +228,7 @@ def load_method(
     }
     prediction_chunks = {key: [] for key in target_chunks}
     weight_chunks = {key: [] for key in target_chunks}
+    joint_targets, joint_predictions, joint_weights = [], [], []
     rows_read = 0
     sources_used = set()
     skipped_files = []
@@ -327,6 +336,7 @@ def load_method(
                 else np.ones(len(events), dtype=np.float64)
             )
 
+            event_targets, event_predictions, event_masks = [], [], []
             for leg in legs:
                 slot = slot_index[leg]
                 pred_valid = to_numpy(events[f"evenet_invisible_{leg}_valid"], bool)
@@ -358,6 +368,15 @@ def load_method(
                     target_chunks[key].append(targets_by_feature[feature][valid])
                     prediction_chunks[key].append(predictions_by_feature[feature][valid])
                     weight_chunks[key].append(base_weight[valid])
+                if return_joint:
+                    event_targets.extend(targets_by_feature[feature] for feature in features)
+                    event_predictions.extend(predictions_by_feature[feature] for feature in features)
+                    event_masks.append(valid)
+            if return_joint:
+                common = np.logical_and.reduce(event_masks)
+                joint_targets.append(np.column_stack(event_targets)[common])
+                joint_predictions.append(np.column_stack(event_predictions)[common])
+                joint_weights.append(base_weight[common])
             rows_read += len(events)
         if max_events is not None and rows_read >= max_events:
             break
@@ -373,7 +392,12 @@ def load_method(
             prediction=np.concatenate(prediction_chunks[key]) if prediction_chunks[key] else np.array([]),
             weight=np.concatenate(weight_chunks[key]) if weight_chunks[key] else np.array([]),
         )
-    return output, rows_read, sorted(sources_used), skipped_files
+    result = (output, rows_read, sorted(sources_used), skipped_files)
+    if return_joint:
+        joint = FeatureSample(np.concatenate(joint_targets), np.concatenate(joint_predictions),
+                              np.concatenate(joint_weights))
+        return (*result, joint)
+    return result
 
 
 def weighted_mean(values: np.ndarray, weights: np.ndarray) -> float:

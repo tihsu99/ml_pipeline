@@ -1,0 +1,59 @@
+# Evaluation only. Paths are relative to this YAML; pipeline-internal paths remain repository-relative.
+analysis_config: analysis.yaml
+comparison_config: prediction_comparison.yaml
+# Inherit the current 1D evaluation feature list, legs, target source and weight column.
+# Optional overrides: features: [theta, phi], legs: [a, b], weight_column: null
+feature_labels:
+  theta: '$\Delta\theta(\tau,\mathrm{vis})$'
+  phi: '$\Delta\phi(\tau,\mathrm{vis})$'
+# Read dataset_size and flag from the same entries used by the QE summary.
+# The results.txt paths in that YAML are not opened or altered here.
+dataset_sizes_config: uncertainty_scaling.yaml
+full_dataset_size: 5000000
+skip_missing_inputs: true  # Only unavailable prediction paths; malformed data still fail.
+methods:
+  baseline_50k:
+    pipeline: pipelines/baseline_pct0p01.yaml
+  DGPO_50k:
+    pipeline: pipelines/DGPO_pct0p01.yaml
+  baseline_250k:
+    pipeline: pipelines/baseline_pct0p05.yaml
+  DGPO_250k:
+    pipeline: pipelines/DGPO_pct0p05.yaml
+  baseline_500k:
+    pipeline: pipelines/baseline_pct0p1.yaml
+  DGPO_500k:
+    pipeline: pipelines/DGPO_pct0p1.yaml
+  baseline_full:
+    pipeline: pipelines/baseline_full.yaml
+# Any entry can instead use path: /path/to/predictions and explicit dataset_size/flag.
+# Or use size_key: <existing uncertainty_scaling entry>. No full-size DGPO input is invented.
+seed: 42
+bootstrap_replicates: 0  # Optional marginal W1 event bootstrap; 0 avoids expensive default work.
+circular_periods:
+  phi: 6.283185307179586  # Supplementary circular_w1; primary W1 follows exact linear distance.
+joint:
+  variables: null  # All existing leg:feature outputs, in leg-major order.
+  target_method: null  # First available Baseline; one common target and normalization for ALL sizes.
+  max_events: 20000  # Equal deterministic subsample per population; 0 uses the full common count.
+  min_target_std: 1.0e-12
+  projections: 1000
+  projection_seeds: [42]  # Add seeds for projection stability mean/std; all methods share each set.
+  projection_batch_size: 16
+  bootstrap_count: 0  # Set 100 when feasible. Uses the first projection seed and the same event count.
+  # Both SWDs use equal event weight, matching (rank-0.5)/N exactly.
+  # Marginal W1 retains the original comparison's event_weight column.
+  diagnostic_pair: ['a:theta', 'b:theta']
+  diagnostic_dataset_size: 250000
+  diagnostic_bins: 40
+# TARP remains optional; never use different events as posterior draws.
+# Add posterior_npz to a method only when repeated conditional draws actually exist.
+tarp:
+  reference_repeats: 20
+  alpha_bins: 20
+  seed: 42
+  reference_ranges:
+    theta: [-3.141592653589793, 3.141592653589793]
+    phi: [-3.141592653589793, 3.141592653589793]
+formats: [png, pdf]
+dpi: 600
