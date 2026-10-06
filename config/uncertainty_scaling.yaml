@@ -43,7 +43,7 @@ DGPO_500k:
 DGPO_v2_500k:
   dataset_size: 550000
   flag: DGPO
-  path: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis_method/DGPO_0p1_v2/qi/evenet/run/ForwardFoldingProcessor_asimovdata/results.txt
+  path: /pscratch/sd/t/tihsu/database/ZtautauAnalysis/ml_baseline_full_analysis_method/condition_dgpo_step500/qi/evenet/run/ForwardFoldingProcessor_asimovdata/results.txt
 
 
 baseline_full:
