@@ -7,6 +7,7 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -20,6 +21,9 @@ except ModuleNotFoundError as exc:  # pragma: no cover
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+from prediction_runtime import resolve_pipeline_model
 STAGES = ("train", "predict", "eval", "fit")
 GPU_STAGES = {"train", "predict"}
 CPU_STAGES = {"eval", "fit"}
@@ -27,6 +31,7 @@ CHECKPOINT_ROLES = ("classification", "diffusion")
 TRAIN_BACKENDS = {"pure-evenet", "dgpo-evenet", "evenet-align"}
 PREDICT_RESERVED_OPTIONS = {"num_gpus", "task_num_shards", "task_shard_index"}
 PREDICT_PATH_OPTIONS = {
+    "model_runtime_config",
     "converted_parquet",
     "normalization_file",
     "output_dir",
@@ -229,6 +234,13 @@ def _validate_predict(
             raise ConfigError(f"checkpoints.{role} is required when predict is enabled.")
     options = _mapping(stage_data.get("options", {}), "predict.options")
     stage_data["options"] = options
+    if "model" in stage_data:
+        if "model_runtime_config" in options:
+            raise ConfigError("Use predict.model without a separate model_runtime_config.")
+        try:
+            stage_data["model"] = resolve_pipeline_model(stage_data["model"], repo_root)
+        except ValueError as exc:
+            raise ConfigError(str(exc)) from exc
     # Use live diffusion weights by default; YAML can explicitly opt back into EMA.
     options.setdefault("disable_ema", True)
     if not isinstance(options["disable_ema"], bool):
@@ -346,6 +358,8 @@ def predict_command(config: dict[str, Any], shard_index: int | None = None) -> l
         "--num-gpus",
         str(resources["gpus_per_node"]),
     ]
+    if "model" in stage:
+        command.extend(("--model-runtime-config", str(Path(config["pipeline"]["output_dir"]) / "resolved_config.yaml")))
     if shard_index is not None:
         command.extend((
             "--task-num-shards", str(resources["nodes"]),
@@ -555,6 +569,8 @@ def print_interactive_summary(
 
 
 def run_interactive_commands(config: dict[str, Any], commands: Iterable[dict[str, Any]]) -> None:
+    if "model" in config["predict"]:
+        write_resolved_config(config)
     for item in commands:
         stage = item["stage"]
         environment = os.environ.copy()
@@ -615,13 +631,17 @@ def render_sbatch(
     return "\n".join(lines).rstrip() + "\n", commands
 
 
-def generate_scripts(config: dict[str, Any], stages: Iterable[str]) -> list[dict[str, Any]]:
+def write_resolved_config(config: dict[str, Any]) -> None:
     output_root = Path(config["pipeline"]["output_dir"])
     output_root.mkdir(parents=True, exist_ok=True)
     resolved_path = output_root / "resolved_config.yaml"
     with resolved_path.open("w") as handle:
         yaml.safe_dump(config, handle, sort_keys=False)
 
+
+def generate_scripts(config: dict[str, Any], stages: Iterable[str]) -> list[dict[str, Any]]:
+    output_root = Path(config["pipeline"]["output_dir"])
+    write_resolved_config(config)
     generated: list[dict[str, Any]] = []
     for stage in stages:
         if not config[stage]["enabled"]:

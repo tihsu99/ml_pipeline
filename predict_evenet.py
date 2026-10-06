@@ -19,6 +19,16 @@ import torch.multiprocessing as mp
 import vector
 import yaml
 
+from prediction_runtime import (
+    check_event_schema,
+    load_strict_model_state,
+    prepare_diffusion_config,
+    runtime_from_argv,
+    sampling_normalizer,
+)
+
+MODEL_RUNTIME = runtime_from_argv(sys.argv[1:])
+
 ML_PIPELINE_ROOT = Path(__file__).resolve().parent
 REPO_ROOT = ML_PIPELINE_ROOT.parent
 EVENET_ROOT_CANDIDATES = [
@@ -30,11 +40,12 @@ EVENET_ROOT = next(
     (path.resolve() for path in EVENET_ROOT_CANDIDATES if path is not None and (path / "evenet").is_dir()),
     ML_PIPELINE_ROOT / "EveNet-Full",
 )
+EVENET_CODE_ROOT = Path(MODEL_RUNTIME.get("code_root", EVENET_ROOT))
 
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
-if str(EVENET_ROOT) not in sys.path:
-    sys.path.insert(0, str(EVENET_ROOT))
+if str(EVENET_CODE_ROOT) not in sys.path:
+    sys.path.insert(0, str(EVENET_CODE_ROOT))
 if str(ML_PIPELINE_ROOT) not in sys.path:
     sys.path.insert(0, str(ML_PIPELINE_ROOT))
 
@@ -46,11 +57,16 @@ from generate_event_info_yaml import (
     parse_evenet_config,
     parse_feature_config,
 )
-from evenet.control.global_config import global_config
+from evenet.control.global_config import Config, global_config
 from evenet.dataset.preprocess import unflatten_dict
 from evenet.network.evenet_model import EveNetModel
 from evenet.utilities.diffusion_sampler import DDIMSampler
 from evenet.utilities.tool import safe_load_state
+
+if MODEL_RUNTIME:
+    import evenet.network.evenet_model as model_module
+    if not Path(model_module.__file__).resolve().is_relative_to(EVENET_CODE_ROOT.resolve()):
+        raise RuntimeError(f"Wrong EveNet package imported: {model_module.__file__}; expected {EVENET_CODE_ROOT}")
 
 vector.register_awkward()
 
@@ -273,6 +289,7 @@ def prepare_runtime_train_config(
         "options": EVENET_ROOT / "share" / "options" / "options.yaml",
         "network": EVENET_ROOT / "share" / "network" / "network-20M.yaml",
     }
+    evenet_defaults.update({key: Path(value) for key, value in MODEL_RUNTIME.get("defaults", {}).items()})
     missing_defaults = [str(path) for path in evenet_defaults.values() if not path.is_file()]
     if missing_defaults:
         raise FileNotFoundError(
@@ -316,6 +333,13 @@ def prepare_runtime_train_config(
     runtime_train_cfg = runtime_dir / "train_runtime.yaml"
     with runtime_train_cfg.open("w") as handle:
         yaml.safe_dump(train_cfg, handle, sort_keys=False)
+    if MODEL_RUNTIME:
+        diffusion_config = prepare_diffusion_config(
+            MODEL_RUNTIME, runtime_dir / "diffusion_runtime.yaml", base_config=runtime_train_cfg,
+        )
+        train_cfg["_prediction_model_runtime"] = dict(MODEL_RUNTIME, diffusion_config=str(diffusion_config))
+        with runtime_train_cfg.open("w") as handle:
+            yaml.safe_dump(train_cfg, handle, sort_keys=False)
     return runtime_train_cfg
 
 
@@ -611,7 +635,7 @@ def predict_converted_events(
                     mode="neutrino",
                     noise_mask=prediction_noise_mask
                 ),
-                normalize_fn=diffusion_model.invisible_normalizer,
+                normalize_fn=sampling_normalizer(diffusion_model, batch_torch),
                 eta=1.0,
                 num_steps=num_steps,
                 use_tqdm=False,
@@ -714,13 +738,22 @@ def load_checkpoint_into_model(
     *,
     use_ema: bool,
     device: torch.device,
+    strict: bool = False,
+    weight_source: str | None = None,
 ) -> EveNetModel:
-    checkpoint = torch.load(checkpoint_path, map_location=device)
-    if use_ema and "ema_state_dict" in checkpoint:
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    if weight_source is not None:
+        if weight_source not in checkpoint:
+            raise ValueError(f"Checkpoint {checkpoint_path} has no {weight_source}")
+        state_dict = checkpoint[weight_source]
+    elif use_ema and "ema_state_dict" in checkpoint:
         state_dict = checkpoint["ema_state_dict"]
     else:
         state_dict = checkpoint["state_dict"]
-    safe_load_state(model, state_dict)
+    if strict:
+        load_strict_model_state(model, state_dict)
+    else:
+        safe_load_state(model, state_dict)
     model.eval()
     return model.to(device)
 
@@ -735,6 +768,9 @@ def load_model_bundle(
 ) -> dict[str, Any]:
     # Keep this consistent with the way EveNetModel is normally initialized in your repo.
     global_config.load_yaml(runtime_train_config)
+    runtime = read_yaml(runtime_train_config).get("_prediction_model_runtime", {})
+    if runtime.get("code_root") and Path(runtime["code_root"]).resolve() != EVENET_CODE_ROOT.resolve():
+        raise ValueError("Model code_root changed after preparing the prediction runtime")
     normalization_dict = torch.load(global_config.options.Dataset.normalization_file, map_location=device)
     classification_model = EveNetModel(
         config=global_config,
@@ -748,8 +784,17 @@ def load_model_bundle(
         neutrino_generation=False,
         normalization_dict=normalization_dict,
     )
+    diffusion_config = global_config
+    diffusion_normalization = normalization_dict
+    if runtime:
+        diffusion_config = Config()
+        diffusion_config.load_yaml(runtime["diffusion_config"])
+        check_event_schema(global_config.event_info, diffusion_config.event_info)
+        diffusion_normalization = torch.load(
+            diffusion_config.options.Dataset.normalization_file, map_location=device, weights_only=False,
+        )
     diffusion_model = EveNetModel(
-        config=global_config,
+        config=diffusion_config,
         device=device,
         classification=False,
         regression=False,
@@ -758,7 +803,7 @@ def load_model_bundle(
         assignment=False,
         segmentation=False,
         neutrino_generation=True,
-        normalization_dict=normalization_dict,
+        normalization_dict=diffusion_normalization,
     )
 
     classification_model = load_checkpoint_into_model(
@@ -766,6 +811,7 @@ def load_model_bundle(
         classification_checkpoint,
         use_ema=False,
         device=device,
+        strict=bool(runtime),
     )
 
     diffusion_model = load_checkpoint_into_model(
@@ -773,9 +819,12 @@ def load_model_bundle(
         diffusion_checkpoint,
         use_ema=diffusion_use_ema,
         device=device,
+        strict=bool(runtime),
+        weight_source=runtime.get("diffusion", {}).get("weights"),
     )
 
-    sampler = DDIMSampler(device=device)
+    sampler_options = runtime.get("sampler", {})
+    sampler = DDIMSampler(device=device, **sampler_options)
 
     return {
         "classification_model": classification_model,
@@ -851,7 +900,16 @@ def predict_worker(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Standalone EveNet predictor for converted parquet inputs."
+        description="Standalone EveNet predictor for converted parquet inputs.",
+        allow_abbrev=False,
+    )
+    parser.add_argument(
+        "--model-runtime-config", type=Path,
+        help="Pipeline YAML containing predict.model; the pipeline launcher supplies this automatically.",
+    )
+    parser.add_argument(
+        "--check-models-only", action="store_true",
+        help="Load both models and validate the bundle on CPU, then exit without reading events.",
     )
     parser.add_argument(
         "--analysis-config",
@@ -1006,10 +1064,29 @@ def main() -> None:
         help="If set, use truth classification, skip classification prediction"
     )
     args = parser.parse_args()
+    if MODEL_RUNTIME and args.disable_ema and MODEL_RUNTIME["diffusion"]["weights"] == "ema_state_dict":
+        parser.error("--disable-ema conflicts with diffusion.weights: ema_state_dict in the model runtime YAML")
 
     analysis_config = read_yaml(args.analysis_config)
     invisible_features = tuple(str(key) for key in analysis_config["Normalization"].get("Invisible", {}))
     prediction_config = analysis_config.get("EveNetPrediction", {})
+    if args.check_models_only:
+        classification_checkpoint = args.classification_checkpoint or args.checkpoint
+        diffusion_checkpoint = args.diffusion_checkpoint or args.checkpoint
+        if classification_checkpoint is None or diffusion_checkpoint is None:
+            parser.error("Model checks require both classification and diffusion checkpoints.")
+        runtime_config = prepare_runtime_train_config(
+            args.train_config.resolve(), args.analysis_config.resolve(), args.evenet_config.resolve(),
+            args.checkpoint,
+            args.normalization_file.expanduser().resolve() if args.normalization_file is not None else None,
+        )
+        load_model_bundle(runtime_config, classification_checkpoint.expanduser().resolve(), diffusion_checkpoint.expanduser().resolve(),
+                          diffusion_use_ema=not args.disable_ema, device=torch.device("cpu"))
+        if MODEL_RUNTIME:
+            print("[model-check] Both checkpoints loaded; schema and strict weight checks passed. No event inference ran.")
+        else:
+            print("[model-check] Legacy permissive loading completed. No strict compatibility check or event inference ran.")
+        return
     output_dir = args.output_dir or prediction_config.get("predict_output_dir") or prediction_config.get("output_dir")
     if output_dir is None:
         parser.error("Set --output-dir or EveNetPrediction.predict_output_dir in analysis.yaml.")
@@ -1068,6 +1145,8 @@ def main() -> None:
         yaml.safe_dump(runtime_train_cfg_data, handle, sort_keys=False)
 
     diffusion_use_ema = not args.disable_ema
+    if MODEL_RUNTIME:
+        diffusion_use_ema = MODEL_RUNTIME["diffusion"]["weights"] == "ema_state_dict"
     classification_check_point = args.classification_checkpoint or args.checkpoint
     diffusion_check_point = args.diffusion_checkpoint or args.checkpoint
     if classification_check_point is None or diffusion_check_point is None:
@@ -1092,6 +1171,12 @@ def main() -> None:
         "classification_checkpoint": str(classification_check_point),
         "diffusion_checkpoint": str(diffusion_check_point),
         "diffusion_state": "ema_state_dict" if diffusion_use_ema else "state_dict",
+        "model_code_root": str(EVENET_CODE_ROOT.resolve()),
+        "model_runtime": MODEL_RUNTIME,
+        "diffusion_runtime_config": (
+            read_yaml(Path(runtime_train_cfg_data["_prediction_model_runtime"]["diffusion_config"]))
+            if MODEL_RUNTIME else None
+        ),
         "converted_parquets": converted_parquets,
         "converted_split_fraction": converted_split_fraction,
         "num_steps": args.num_steps,

@@ -1029,6 +1029,80 @@ Check that every sample in `ml_pipeline/config/analysis.yaml` has valid
 `raw_files`. Export uses these files to rebuild the raw complement outside the
 selected baseline rows.
 
+## Evaluating a conditioned diffusion checkpoint alongside legacy models
+
+Configure model selection in `config/pipelines/condition_dgpo.yaml`:
+
+```yaml
+predict:
+  model:
+    evenet_root: /path/to/dgpo-omnifold-pipeline/evenet_dgpo
+    network: /path/to/condition_dgpo/network.yaml
+    normalization: /path/to/condition_dgpo/normalization.pt
+    options_default: EveNet-Align/share/options/options.yaml
+    classification_network: EveNet-Align/share/network/network-20M.yaml
+    sampler: legacy
+  options:
+    disable_ema: true
+```
+
+Only `evenet_root` and `network` are required in `predict.model`. The root must
+contain `evenet/network/evenet_model.py` from the implementation matching the
+checkpoint. Relative paths resolve from the `ml_pipeline` directory. No extra
+evaluation or model-runtime YAML needs to be maintained.
+
+The diffusion network section is replaced completely by `network.yaml`.
+Other settings inherit the prepared `configs.train`, `configs.analysis`, and
+`configs.evenet_schema`. Optional `normalization` and `event_info` paths override
+the diffusion normalization and event schema; otherwise the baseline values
+are used. `options_default` and `classification_network` pin the original
+configuration defaults. The example keeps the existing classification
+checkpoint and input data from `baseline_full.yaml`, uses the supplied step-500
+diffusion checkpoint, and writes results to separate directories.
+
+Set `evenet_root` in that file, then preview the prediction commands:
+
+```bash
+python3 scripts/generate_pipeline_shortcut.py \
+  --config config/pipelines/condition_dgpo.yaml --stage predict --dry-run
+```
+
+Use `--submit` instead of `--dry-run` to submit prediction, or `--interactive`
+to run through the existing interactive launcher. The launcher saves an
+absolute-path snapshot at `pipeline.output_dir/resolved_config.yaml` and
+passes it to prediction automatically. Generate on the machine where the
+pipeline will run. To check model loading through the same launcher, temporarily
+set `predict.options.check_models_only: true` and run only the predict stage.
+This check loads models on CPU without event inference; the launcher's resource
+settings still apply. Remove that setting before actual prediction. Opt-in model
+loading rejects missing, unexpected, or shape-mismatched active weights and
+normalization mismatches. Disabled task-head weights are allowed. Setting
+`disable_ema: false` requires an `ema_state_dict` in the diffusion checkpoint.
+
+The implementation is selected once per prediction process for both models;
+their network configurations and checkpoints remain separate. A pipeline
+without `predict.model` keeps the original import and loading behavior, so
+existing pipeline files remain the switch back to legacy models. The manifest
+records the selected code root and resolved diffusion configuration.
+
+The sampler remains DDIM; `sampler: stable_v` is available when required by the
+checkpoint's sampling recipe. `predict.options.num_steps` controls the steps.
+Conditional-coordinate models use the selected implementation's coordinate
+normalizer. Input feature/class ordering is checked, but matching schemas do
+not establish the provenance or physics definitions of the parquet data.
+
+Local checks:
+
+```bash
+EVENET_TEST_CONDITIONED_ROOT=/path/to/dgpo-omnifold-pipeline/evenet_dgpo \
+  python3 -m unittest test_prediction_runtime test_pipeline_shortcut_generator -v
+```
+
+The tests cover small synthetic CPU checkpoint roundtrips and DDIM samples,
+including network-only pipeline configuration. The external implementation was
+checked at commit `683d60711dc94b687104c31e2b42afec6ff383aa`. This does not verify
+the real CFS checkpoints, their producing revision, or physics performance.
+
 ## Updating the ML Repositories
 
 Normal users should use the commits recorded by the parent repositories.
