@@ -24,6 +24,8 @@ methods:
     pipeline: pipelines/baseline_pct0p1.yaml
   DGPO_500k:
     pipeline: pipelines/DGPO_pct0p1.yaml
+  DGPO_550k:
+    pipeline: pipelines/condition_dgpo_step500.yaml
   baseline_full:
     pipeline: pipelines/baseline_full.yaml
 # Any entry can instead use path: /path/to/predictions and explicit dataset_size/flag.
