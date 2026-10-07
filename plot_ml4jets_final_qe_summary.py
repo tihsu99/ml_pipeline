@@ -17,9 +17,10 @@ Without reference, console ratios use DGPO / baseline at matching dataset sizes.
 Training dataset size controls color; only hatch
 distinguishes DGPO. B_Ak, B_An, B_Ar are displayed as B_k, B_n, B_r.
 
-By default, export one row of individual B/C uncertainties with numeric bar labels
-in PNG/PDF/SVG, selected and ordered by YAML metrics. Use --layout summary for the
-original five figures. The console lists outputs, precision ratios at each paired
+By default, export all five original figures plus the B/C uncertainty row with
+numeric labels and configured ratio panels in PNG/PDF/SVG. YAML metrics selects
+and orders the row. Use --layout summary or --layout bc-row to export only that
+subset. The console lists outputs, precision ratios at each paired
 dataset size, and a rerun command. C_ij and Cij are aliases; Cij and Cji remain distinct.
 Run --self-test for a small check of selection and asymmetric metric handling.
 """
@@ -264,7 +265,7 @@ def draw_panel(ax, results: dict, title: str, metrics: tuple, field: str, labels
 
 
 def make_figures(results: dict, output_dir: Path, formats: list[str], dpi: int,
-                 full_dataset_size=None, row_metrics=None, references=()) -> list[Path]:
+                 full_dataset_size=None, row_metrics=None, references=(), include_summary=True) -> list[Path]:
     ratio_panels = [(name, uncertainty_ratios(results, key, row_metrics))
                     for name, key in references] if row_metrics is not None else []
     sizes = sorted({size for size, _ in results})
@@ -308,7 +309,8 @@ def make_figures(results: dict, output_dir: Path, formats: list[str], dpi: int,
                        "uncertainty", labels, colors)
             legends_and_note(fig, results, labels, colors, ratio_dots=bool(ratio_panels))
             save(fig, "ml4jets_bc_uncertainty_row")
-            return outputs
+            if not include_summary:
+                return outputs
         for stem, title, metrics, field in FIGURES:
             fig, ax = plt.subplots(figsize=(max(4.8, len(sizes) * 1.1), 3.6))
             fig.subplots_adjust(left=0.17, right=0.97, bottom=0.19, top=0.73 - legend_extra)
@@ -352,6 +354,8 @@ def self_test():
     from contextlib import redirect_stdout
     from io import StringIO
     import tempfile
+    import sys
+    from unittest.mock import patch
 
     series = ((50_000, "Baseline"), (50_000, "DGPO"), (250_000, "Baseline"),
               (250_000, "DGPO"), (500_000, "Baseline"), (500_000, "DGPO"),
@@ -466,6 +470,15 @@ def self_test():
         assert np.allclose([bar.get_height() for bar in ax.patches[:12]],
                            [0.015 * (index + 1) for index in range(12)])
         plt.close(fig)
+        # The default CLI must add the B/C row without replacing the five originals.
+        result_path.write_text(result_path.read_text() + "\nConcurrence 0.5 +0.2 -0.1\n")
+        all_output = root / "all_figures"
+        with patch.object(sys, "argv", [__file__, "--config", str(config_path),
+                                       "--output-dir", str(all_output), "--formats", "svg"]):
+            with redirect_stdout(StringIO()):
+                main()
+        expected = {stem for stem, *_ in FIGURES} | {"ml4jets_qe_summary_3panel", "ml4jets_bc_uncertainty_row"}
+        assert {path.stem for path in all_output.glob("*.svg")} == expected
         result_path.write_text(result_path.read_text().replace("C_rn", "unused"))
         try:
             load_results(config_path, row_metrics)
@@ -489,8 +502,8 @@ def main():
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--formats", nargs="+", choices=("png", "pdf", "svg"), default=["png", "pdf", "svg"])
     parser.add_argument("--dpi", type=int, default=600)
-    parser.add_argument("--layout", choices=("summary", "bc-row"), default="bc-row",
-                        help="bc-row (default) plots individual B/C entries from YAML metrics in one row")
+    parser.add_argument("--layout", choices=("all", "summary", "bc-row"), default="all",
+                        help="all (default) exports five original figures plus the B/C row; select a subset if needed")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
     if args.self_test:
@@ -511,8 +524,9 @@ def main():
                 isinstance(full_dataset_size, bool) or not isinstance(full_dataset_size, (int, float))
                 or not math.isfinite(full_dataset_size) or full_dataset_size <= 0):
             raise ValueError("plot.full_dataset_size must be a positive finite number")
-        row_metrics = bc_row_metrics(config) if args.layout == "bc-row" else None
-        parameters = row_metrics if row_metrics is not None else PARAMETERS
+        row_metrics = bc_row_metrics(config) if args.layout != "summary" else None
+        parameters = tuple(dict.fromkeys(
+            (() if args.layout == "bc-row" else PARAMETERS) + (row_metrics or ())))
         references = reference_inputs(config)
         results = load_results(args.config, parameters)
         for _, reference in references:
@@ -520,7 +534,7 @@ def main():
     except (ValueError, OSError, yaml.YAMLError) as exc:
         parser.exit(2, f"Error: {exc}\n")
     outputs = make_figures(results, args.output_dir, list(dict.fromkeys(args.formats)), args.dpi,
-                           full_dataset_size, row_metrics, references)
+                           full_dataset_size, row_metrics, references, include_summary=args.layout != "bc-row")
     print("\nGenerated files:")
     for path in outputs:
         print(path)

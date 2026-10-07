@@ -1,7 +1,8 @@
 # Paths may point to *_combined.json/csv files from extract_qi_final_measurements.py
 # or to results.txt files that already contain a "Combined fit regions:" block.
 metrics: [B_Ak, B_An, B_Ar, Ckk, Cnn, Crr, C_kn, C_kr, C_nk, C_nr, C_rk, C_rn, Concurrence, Ckk + Cnn]
-# --layout bc-row plots the individual B/C entries above, in this order.
+# The default includes all original figures plus the B/C row in this order.
+# --layout bc-row exports only the B/C row and its configured ratio panels.
 # One ratio panel per input name, in list order. A single name also works.
 # Omit reference or use [] to hide all bc-row ratio panels.
 reference:
