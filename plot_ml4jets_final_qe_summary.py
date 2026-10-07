@@ -11,6 +11,8 @@ Precision is (err_up + err_down) / 2. Concurrence signed sensitivity uses the
 existing value / uncertainty-toward-zero implementation. YAML reference accepts
 one input name or a list of names, adding one bc-row ratio panel per reference
 in list order. Each panel shows uncertainty / that reference's uncertainty.
+Ratio panels use filled Baseline dots and hollow DGPO dots, with automatic
+limits symmetric about one and numeric labels.
 Without reference, console ratios use DGPO / baseline at matching dataset sizes.
 Training dataset size controls color; only hatch
 distinguishes DGPO. B_Ak, B_An, B_Ar are displayed as B_k, B_n, B_r.
@@ -34,6 +36,8 @@ import matplotlib
 
 matplotlib.use("Agg")
 from matplotlib import pyplot as plt
+from matplotlib.legend_handler import HandlerTuple
+from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 from matplotlib.ticker import MaxNLocator, ScalarFormatter
 import numpy as np
@@ -179,16 +183,21 @@ def load_results(config_path: Path, parameters=PARAMETERS) -> dict:
     return results
 
 
-def legends_and_note(fig, results, labels, colors):
+def legends_and_note(fig, results, labels, colors, ratio_dots=False):
     color_handles = [Patch(facecolor=colors[size], edgecolor="0.25", linewidth=0.5,
                            label=label) for size, label in labels.items()]
+    method_names = [method for method in ("Baseline", "DGPO") if any(key[1] == method for key in results)]
     methods = [Patch(facecolor="white", edgecolor="0.25", linewidth=0.5,
-                     hatch="///" if method == "DGPO" else "", label=method)
-               for method in ("Baseline", "DGPO") if any(key[1] == method for key in results)]
+                     hatch="///" if method == "DGPO" else "") for method in method_names]
+    if ratio_dots:
+        methods = [(patch, Line2D([], [], linestyle="none", marker="o", markersize=4,
+                                 markeredgecolor="0.25", markerfacecolor="white" if method == "DGPO" else "0.25"))
+                   for patch, method in zip(methods, method_names)]
     fig.legend(handles=color_handles, loc="upper center", bbox_to_anchor=(0.53, 0.99),
                ncol=min(len(labels), 4))
     rows = math.ceil(len(labels) / 4)
-    fig.legend(handles=methods, loc="upper center", bbox_to_anchor=(0.53, 0.99 - rows * 0.065), ncol=2)
+    fig.legend(handles=methods, labels=method_names, handler_map={tuple: HandlerTuple(ndivide=None)},
+               loc="upper center", bbox_to_anchor=(0.53, 0.99 - rows * 0.065), ncol=2)
     fig.text(0.5, 0.025, "Expected Asimov performance", ha="center", color="0.4", fontsize=7)
 
 
@@ -207,14 +216,23 @@ def draw_panel(ax, results: dict, title: str, metrics: tuple, field: str, labels
             spacing = 0.75 / len(series)
             positions = np.arange(len(metrics)) + (index - (len(series) - 1) / 2) * spacing
             width = spacing * 0.9
-        bars = ax.bar(positions, values, width=width, color=colors[size],
-                      edgecolor="0.2", linewidth=0.55, hatch="///" if method == "DGPO" else "")
-        if metrics == ("Concurrence",):
-            ax.bar_label(bars, labels=[f"{value:.3g}" for value in values], padding=3, fontsize=8)
-        elif field in {"uncertainty", "ratio"}:
-            ax.bar_label(bars, labels=[np.format_float_positional(
-                value, precision=3, fractional=False, trim="-") for value in values],
-                padding=3, fontsize=6, rotation=90)
+        if field == "ratio":
+            ax.plot(positions, values, linestyle="none", marker="o", markersize=4,
+                    markeredgecolor=colors[size], markeredgewidth=0.9,
+                    markerfacecolor="white" if method == "DGPO" else colors[size], zorder=3)
+            for x, value in zip(positions, values):
+                ax.annotate(np.format_float_positional(value, precision=3, fractional=False, trim="-"),
+                            (x, value), xytext=(0, 5), textcoords="offset points",
+                            ha="center", va="bottom", fontsize=6, rotation=90)
+        else:
+            bars = ax.bar(positions, values, width=width, color=colors[size],
+                          edgecolor="0.2", linewidth=0.55, hatch="///" if method == "DGPO" else "")
+            if metrics == ("Concurrence",):
+                ax.bar_label(bars, labels=[f"{value:.3g}" for value in values], padding=3, fontsize=8)
+            elif field == "uncertainty":
+                ax.bar_label(bars, labels=[np.format_float_positional(
+                    value, precision=3, fractional=False, trim="-") for value in values],
+                    padding=3, fontsize=6, rotation=90)
         heights.extend(values)
     if metrics == ("Concurrence",):
         ax.set_xticks(range(len(sizes)), list(labels.values()))
@@ -237,6 +255,11 @@ def draw_panel(ax, results: dict, title: str, metrics: tuple, field: str, labels
     if field == "sensitivity":
         ax.axhline(0, color="0.3", linewidth=0.7)
     elif field == "ratio":
+        deviation = max(abs(lower - 1), abs(upper - 1))
+        half_range = max(1.5 * deviation, 0.01)
+        ax.set_ylim(1 - half_range, 1 + half_range)
+        offsets = MaxNLocator(4).tick_values(-half_range, half_range)
+        ax.set_yticks(1 + offsets[np.abs(offsets) <= half_range])
         ax.axhline(1, color="0.3", linewidth=0.8, linestyle="--")
 
 
@@ -283,7 +306,7 @@ def make_figures(results: dict, output_dir: Path, formats: list[str], dpi: int,
                     upper_ax.tick_params(axis="x", labelbottom=False)
             draw_panel(ax, results, "Polarization and spin correlation", row_metrics,
                        "uncertainty", labels, colors)
-            legends_and_note(fig, results, labels, colors)
+            legends_and_note(fig, results, labels, colors, ratio_dots=bool(ratio_panels))
             save(fig, "ml4jets_bc_uncertainty_row")
             return outputs
         for stem, title, metrics, field in FIGURES:
@@ -361,6 +384,19 @@ def self_test():
     assert math.isclose(ratios[series[0]]["Ckn"]["ratio"], 1.5)
     assert ratios[series[0]]["Cnk"]["ratio"] == 0.25
     assert all(row["ratio"] == 1 for row in ratios[series[-1]].values())
+    for ratio_values in (ratios, {series[-1]: ratios[series[-1]]}):
+        fig, ax = plt.subplots()
+        ratio_labels = {size: str(size) for size, _ in ratio_values}
+        draw_panel(ax, ratio_values, "test", ("Ckn", "Cnk"), "ratio",
+                   ratio_labels, dict.fromkeys(ratio_labels, "gray"))
+        assert not ax.patches and len(ax.lines) == len(ratio_values) + 1
+        assert all(line.get_marker() == "o" and line.get_linestyle() == "None" for line in ax.lines[:-1])
+        assert len(ax.texts) == 2 * len(ratio_values)
+        assert math.isclose(sum(ax.get_ylim()), 2)
+        assert 1 in ax.get_yticks()
+        if len(ratio_values) == 1:
+            assert np.allclose(ax.get_ylim(), (0.99, 1.01))
+        plt.close(fig)
     ratio_inputs[series[-1]]["Ckn"]["uncertainty"] = 0
     try:
         uncertainty_ratios(ratio_inputs, series[-1], ("Ckn", "Cnk"))
