@@ -179,6 +179,10 @@ def draw_panel(ax, results: dict, title: str, metrics: tuple, field: str, labels
                       edgecolor="0.2", linewidth=0.55, hatch="///" if method == "DGPO" else "")
         if metrics == ("Concurrence",):
             ax.bar_label(bars, labels=[f"{value:.3g}" for value in values], padding=3, fontsize=8)
+        elif field == "uncertainty":
+            ax.bar_label(bars, labels=[np.format_float_positional(
+                value, precision=3, fractional=False, trim="-") for value in values],
+                padding=3, fontsize=6, rotation=90)
         heights.extend(values)
     if metrics == ("Concurrence",):
         ax.set_xticks(range(len(sizes)), list(labels.values()))
@@ -196,7 +200,7 @@ def draw_panel(ax, results: dict, title: str, metrics: tuple, field: str, labels
     ax.yaxis.set_major_formatter(formatter)
     lower, upper = min(heights), max(heights)
     span = max(upper, 0) - min(lower, 0)
-    padding = (span or 1) * 0.18
+    padding = (span or 1) * (0.30 if field == "uncertainty" and metrics != ("Concurrence",) else 0.18)
     ax.set_ylim(min(lower, 0) - (padding if lower < 0 else 0), max(upper, 0) + padding)
     if field == "sensitivity":
         ax.axhline(0, color="0.3", linewidth=0.7)
@@ -329,6 +333,8 @@ def self_test():
         fig, ax = plt.subplots()
         draw_panel(ax, row_results, "test", row_metrics, "uncertainty", labels, colors)
         assert len(ax.patches) == 12 * len(series)
+        assert len(ax.texts) == len(ax.patches)
+        assert [text.get_text() for text in ax.texts[:3]] == ["0.015", "0.03", "0.045"]
         assert [tick.get_text() for tick in ax.get_xticklabels()] == [MATH_LABELS[m] for m in row_metrics]
         assert np.allclose([bar.get_height() for bar in ax.patches[:12]],
                            [0.015 * (index + 1) for index in range(12)])
