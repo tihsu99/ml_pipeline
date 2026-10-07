@@ -2,6 +2,11 @@
 # or to results.txt files that already contain a "Combined fit regions:" block.
 metrics: [B_Ak, B_An, B_Ar, Ckk, Cnn, Crr, C_kn, C_kr, C_nk, C_nr, C_rk, C_rn, Concurrence, Ckk + Cnn]
 # --layout bc-row plots the individual B/C entries above, in this order.
+# One ratio panel per input name, in list order. A single name also works.
+# Omit reference or use [] to hide all bc-row ratio panels.
+reference:
+  - baseline_500k
+  - baseline_full
 
 plot:
   log_x: true

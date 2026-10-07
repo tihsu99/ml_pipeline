@@ -8,8 +8,11 @@ the largest configured dataset size is used. Relative result paths are relative
 to that YAML, as in the existing plotter. No fit, channel combination, or result-file modification is performed.
 
 Precision is (err_up + err_down) / 2. Concurrence signed sensitivity uses the
-existing value / uncertainty-toward-zero implementation. Ratios are DGPO /
-baseline precision, not significance ratios. Training dataset size controls color; only hatch
+existing value / uncertainty-toward-zero implementation. YAML reference accepts
+one input name or a list of names, adding one bc-row ratio panel per reference
+in list order. Each panel shows uncertainty / that reference's uncertainty.
+Without reference, console ratios use DGPO / baseline at matching dataset sizes.
+Training dataset size controls color; only hatch
 distinguishes DGPO. B_Ak, B_An, B_Ar are displayed as B_k, B_n, B_r.
 
 By default, export one row of individual B/C uncertainties with numeric bar labels
@@ -36,7 +39,7 @@ from matplotlib.ticker import MaxNLocator, ScalarFormatter
 import numpy as np
 import yaml
 
-from plot_uncertainty_scaling import canonical_metric, extract_measurements, sensitivity_value
+from plot_uncertainty_scaling import RESERVED_CONFIG_KEYS, canonical_metric, extract_measurements, sensitivity_value
 
 
 # Keep the scientific panels and styling separate from YAML-selected inputs.
@@ -80,7 +83,7 @@ def selected_inputs(config: dict) -> dict:
     """Use every configured result entry; never silently discard a dataset size."""
     selected = {}
     for name, item in config.items():
-        if name in {"metrics", "plot"}:
+        if name in RESERVED_CONFIG_KEYS:
             continue
         if not isinstance(item, dict):
             raise ValueError(f"Input {name!r} must be a mapping")
@@ -98,6 +101,35 @@ def selected_inputs(config: dict) -> dict:
     if not selected:
         raise ValueError("Config contains no result inputs")
     return dict(sorted(selected.items()))
+
+
+def reference_inputs(config):
+    names = config.get("reference")
+    if names is None:
+        return []
+    if isinstance(names, str):
+        names = [names]
+    inputs = {name: key for key, (name, _) in selected_inputs(config).items()}
+    if not isinstance(names, list) or any(not isinstance(name, str) or name not in inputs for name in names):
+        raise ValueError(f"reference must name configured inputs (string or list): {', '.join(inputs)}")
+    if len(set(names)) != len(names):
+        raise ValueError("reference contains duplicate input names")
+    return [(name, inputs[name]) for name in names]
+
+
+def uncertainty_ratios(results, reference, parameters):
+    """Normalize each metric independently; no ratio error propagation is implied."""
+    ratios = {key: {} for key in results}
+    for metric in parameters:
+        denominator = results[reference][metric]["uncertainty"]
+        if not math.isfinite(denominator) or denominator <= 0:
+            raise ValueError(f"Reference uncertainty for {metric} must be positive and finite")
+        for key, measurements in results.items():
+            ratio = measurements[metric]["uncertainty"] / denominator
+            if not math.isfinite(ratio):
+                raise ValueError(f"Non-finite uncertainty ratio for {series_label(key)}: {metric}")
+            ratios[key][metric] = {"ratio": ratio}
+    return ratios
 
 
 def bc_row_metrics(config: dict) -> tuple:
@@ -179,7 +211,7 @@ def draw_panel(ax, results: dict, title: str, metrics: tuple, field: str, labels
                       edgecolor="0.2", linewidth=0.55, hatch="///" if method == "DGPO" else "")
         if metrics == ("Concurrence",):
             ax.bar_label(bars, labels=[f"{value:.3g}" for value in values], padding=3, fontsize=8)
-        elif field == "uncertainty":
+        elif field in {"uncertainty", "ratio"}:
             ax.bar_label(bars, labels=[np.format_float_positional(
                 value, precision=3, fractional=False, trim="-") for value in values],
                 padding=3, fontsize=6, rotation=90)
@@ -191,7 +223,7 @@ def draw_panel(ax, results: dict, title: str, metrics: tuple, field: str, labels
         ax.set_xticks(range(len(metrics)), [MATH_LABELS[metric] for metric in metrics])
     ax.set_title(title, loc="left", pad=9)
     ax.set_ylabel(r"Expected sensitivity to zero [$\sigma$]" if field == "sensitivity"
-                  else "Combined uncertainty")
+                  else "Uncertainty / reference" if field == "ratio" else "Combined uncertainty")
     ax.grid(axis="y", color="0.9", linewidth=0.5)
     ax.set_yscale("linear")
     ax.yaxis.set_major_locator(MaxNLocator(4))
@@ -200,14 +232,18 @@ def draw_panel(ax, results: dict, title: str, metrics: tuple, field: str, labels
     ax.yaxis.set_major_formatter(formatter)
     lower, upper = min(heights), max(heights)
     span = max(upper, 0) - min(lower, 0)
-    padding = (span or 1) * (0.30 if field == "uncertainty" and metrics != ("Concurrence",) else 0.18)
+    padding = (span or 1) * (0.30 if field in {"uncertainty", "ratio"} and metrics != ("Concurrence",) else 0.18)
     ax.set_ylim(min(lower, 0) - (padding if lower < 0 else 0), max(upper, 0) + padding)
     if field == "sensitivity":
         ax.axhline(0, color="0.3", linewidth=0.7)
+    elif field == "ratio":
+        ax.axhline(1, color="0.3", linewidth=0.8, linestyle="--")
 
 
 def make_figures(results: dict, output_dir: Path, formats: list[str], dpi: int,
-                 full_dataset_size=None, row_metrics=None) -> list[Path]:
+                 full_dataset_size=None, row_metrics=None, references=()) -> list[Path]:
+    ratio_panels = [(name, uncertainty_ratios(results, key, row_metrics))
+                    for name, key in references] if row_metrics is not None else []
     sizes = sorted({size for size, _ in results})
     full_dataset_size = full_dataset_size or max(sizes)
     labels = {size: dataset_size_label(size, full_dataset_size) for size in sizes}
@@ -228,8 +264,23 @@ def make_figures(results: dict, output_dir: Path, formats: list[str], dpi: int,
 
     with plt.rc_context(STYLE):
         if row_metrics is not None:
-            fig, ax = plt.subplots(figsize=(max(7, len(row_metrics) * 1.15), 3.8))
-            fig.subplots_adjust(left=0.065, right=0.99, bottom=0.19, top=0.73 - legend_extra)
+            width = max(7, len(row_metrics) * 1.15)
+            if not ratio_panels:
+                fig, ax = plt.subplots(figsize=(width, 3.8))
+                fig.subplots_adjust(left=0.065, right=0.99, bottom=0.19, top=0.73 - legend_extra)
+            else:
+                count = len(ratio_panels)
+                fig, axes = plt.subplots(1 + count, 1, sharex=True, figsize=(width, 3.8 + 3 * count),
+                                         gridspec_kw={"height_ratios": [2] + [1.3] * count})
+                ax = axes[0]
+                fig.subplots_adjust(left=0.065, right=0.99, bottom=0.10,
+                                    top=0.80 - legend_extra, hspace=0.30)
+                for ratio_ax, (name, ratios) in zip(axes[1:], ratio_panels):
+                    draw_panel(ratio_ax, ratios, f"Reference: {name}", row_metrics,
+                               "ratio", labels, colors)
+                    ratio_ax.set_title(f"Reference: {name}", loc="left", fontsize=9)
+                for upper_ax in axes[:-1]:
+                    upper_ax.tick_params(axis="x", labelbottom=False)
             draw_panel(ax, results, "Polarization and spin correlation", row_metrics,
                        "uncertainty", labels, colors)
             legends_and_note(fig, results, labels, colors)
@@ -250,7 +301,15 @@ def make_figures(results: dict, output_dir: Path, formats: list[str], dpi: int,
     return outputs
 
 
-def print_ratios(results, full_dataset_size=None, parameters=PARAMETERS):
+def print_ratios(results, full_dataset_size=None, parameters=PARAMETERS, references=()):
+    if references:
+        for name, reference in references:
+            ratios = uncertainty_ratios(results, reference, parameters)
+            print(f"\nCombined uncertainty ratios: each series / {name}")
+            for key, measurements in ratios.items():
+                print(series_label(key) + ": " + ", ".join(
+                    f"{metric}={measurements[metric]['ratio']:.4f}" for metric in parameters))
+        return
     sizes = sorted({size for size, _ in results})
     full_dataset_size = full_dataset_size or max(sizes)
     paired = [size for size in sizes if all((size, method) in results for method in ("Baseline", "DGPO"))]
@@ -277,6 +336,38 @@ def self_test():
     config = {str(index): {"dataset_size": size, "flag": method, "path": "results.txt"}
               for index, (size, method) in enumerate(reversed(series))}
     assert tuple(selected_inputs(config)) == series
+    assert reference_inputs(config) == []
+    config["reference"] = "0"
+    assert reference_inputs(config) == [("0", series[-1])]
+    config["reference"] = ["1", "0"]
+    assert reference_inputs(config) == [("1", series[-2]), ("0", series[-1])]
+    config["reference"] = []
+    assert reference_inputs(config) == []
+    assert tuple(selected_inputs(config)) == series
+    for invalid in ("missing", 0, ["0", "missing"], ["0", 0], ["0", "0"], {"name": "0"}):
+        config["reference"] = invalid
+        try:
+            reference_inputs(config)
+        except ValueError as exc:
+            assert "reference" in str(exc)
+        else:
+            raise AssertionError("Invalid reference was accepted")
+    del config["reference"]
+    ratio_inputs = {
+        series[0]: {"Ckn": {"uncertainty": 0.3}, "Cnk": {"uncertainty": 0.1}},
+        series[-1]: {"Ckn": {"uncertainty": 0.2}, "Cnk": {"uncertainty": 0.4}},
+    }
+    ratios = uncertainty_ratios(ratio_inputs, series[-1], ("Ckn", "Cnk"))
+    assert math.isclose(ratios[series[0]]["Ckn"]["ratio"], 1.5)
+    assert ratios[series[0]]["Cnk"]["ratio"] == 0.25
+    assert all(row["ratio"] == 1 for row in ratios[series[-1]].values())
+    ratio_inputs[series[-1]]["Ckn"]["uncertainty"] = 0
+    try:
+        uncertainty_ratios(ratio_inputs, series[-1], ("Ckn", "Cnk"))
+    except ValueError as exc:
+        assert "positive and finite" in str(exc)
+    else:
+        raise AssertionError("Zero reference uncertainty was accepted")
     assert dataset_size_label(500_000, 5_000_000) == "10%"
     assert dataset_size_label(100_000, 5_000_000) == "2%"
     config["duplicate"] = config["0"]
@@ -386,15 +477,18 @@ def main():
             raise ValueError("plot.full_dataset_size must be a positive finite number")
         row_metrics = bc_row_metrics(config) if args.layout == "bc-row" else None
         parameters = row_metrics if row_metrics is not None else PARAMETERS
+        references = reference_inputs(config)
         results = load_results(args.config, parameters)
+        for _, reference in references:
+            uncertainty_ratios(results, reference, parameters)
     except (ValueError, OSError, yaml.YAMLError) as exc:
         parser.exit(2, f"Error: {exc}\n")
     outputs = make_figures(results, args.output_dir, list(dict.fromkeys(args.formats)), args.dpi,
-                           full_dataset_size, row_metrics)
+                           full_dataset_size, row_metrics, references)
     print("\nGenerated files:")
     for path in outputs:
         print(path)
-    print_ratios(results, full_dataset_size, parameters)
+    print_ratios(results, full_dataset_size, parameters, references)
     print("\nRun command:\n" + shlex.join([
         "python3", str(Path(__file__).resolve()), "--config", str(args.config),
         "--output-dir", str(args.output_dir), "--formats", *args.formats, "--dpi", str(args.dpi),

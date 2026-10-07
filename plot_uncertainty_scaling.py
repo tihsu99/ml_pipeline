@@ -30,7 +30,7 @@ matplotlib.rcParams.update({
 })
 
 
-RESERVED_CONFIG_KEYS = {"metrics", "plot"}
+RESERVED_CONFIG_KEYS = {"metrics", "plot", "reference"}
 COLORS = ("#0F4D92", "#8BCF8B", "#B64342", "#42949E", "#9A4D8E", "#CFCECE")
 HATCHES = ("", "//", "\\\\", "..", "xx")
 NUMBER = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
