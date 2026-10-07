@@ -1,6 +1,7 @@
 # Paths may point to *_combined.json/csv files from extract_qi_final_measurements.py
 # or to results.txt files that already contain a "Combined fit regions:" block.
-metrics: [B_An, B_Ak, B_Ar, Cnn, Crr, Ckk, Concurrence, Ckk + Cnn]
+metrics: [B_Ak, B_An, B_Ar, Ckk, Cnn, Crr, C_kn, C_kr, C_nk, C_nr, C_rk, C_rn, Concurrence, Ckk + Cnn]
+# --layout bc-row plots the individual B/C entries above, in this order.
 
 plot:
   log_x: true

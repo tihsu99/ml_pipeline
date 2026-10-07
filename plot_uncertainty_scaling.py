@@ -55,8 +55,7 @@ def parse_args() -> argparse.Namespace:
 
 def canonical_metric(name: object) -> str:
     metric = " ".join(str(name).strip().rstrip(":=").split())
-    for old, new in (("C_nn", "Cnn"), ("C_rr", "Crr"), ("C_kk", "Ckk")):
-        metric = metric.replace(old, new)
+    metric = re.sub(r"\bC_([nkr]{2})\b", r"C\1", metric)
     return re.sub(r"\s*([+-])\s*", r" \1 ", metric).strip()
 
 

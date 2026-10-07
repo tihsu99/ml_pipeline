@@ -14,6 +14,8 @@ distinguishes DGPO. B_Ak, B_An, B_Ar are displayed as B_k, B_n, B_r.
 
 The five figures are exported in PNG/PDF/SVG by default. The console lists all
 outputs, the seven precision ratios at each paired dataset size, and a rerun command.
+Use --layout bc-row for one row of individual B/C uncertainties, selected and
+ordered by YAML metrics. C_ij and Cij are aliases; Cij and Cji remain distinct.
 Run --self-test for a small check of selection and asymmetric metric handling.
 """
 
@@ -21,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import re
 from pathlib import Path
 import shlex
 
@@ -33,7 +36,7 @@ from matplotlib.ticker import MaxNLocator, ScalarFormatter
 import numpy as np
 import yaml
 
-from plot_uncertainty_scaling import extract_measurements, sensitivity_value
+from plot_uncertainty_scaling import canonical_metric, extract_measurements, sensitivity_value
 
 
 # Keep the scientific panels and styling separate from YAML-selected inputs.
@@ -46,8 +49,9 @@ FIGURES = (
     ("ml4jets_polarization_uncertainty", "Polarization", ("B_Ak", "B_An", "B_Ar"), "uncertainty"),
     ("ml4jets_correlation_uncertainty", "Spin correlation", ("Ckk", "Cnn", "Crr"), "uncertainty"),
 )
-MATH_LABELS = {"B_Ak": r"$B_k$", "B_An": r"$B_n$", "B_Ar": r"$B_r$",
-               "Ckk": r"$C_{kk}$", "Cnn": r"$C_{nn}$", "Crr": r"$C_{rr}$"}
+MATH_LABELS = {**{f"B_A{i}": rf"$B_{i}$" for i in "knr"},
+               **{f"B_B{i}": rf"$B^{{B}}_{i}$" for i in "knr"},
+               **{f"C{i}{j}": rf"$C_{{{i}{j}}}$" for i in "knr" for j in "knr"}}
 STYLE = {
     "font.family": "sans-serif", "font.sans-serif": ["Arial", "DejaVu Sans"],
     "font.size": 9, "axes.titlesize": 11, "axes.labelsize": 9,
@@ -96,7 +100,19 @@ def selected_inputs(config: dict) -> dict:
     return dict(sorted(selected.items()))
 
 
-def load_results(config_path: Path) -> dict:
+def bc_row_metrics(config: dict) -> tuple:
+    """Select individual spin coefficients, preserving YAML order."""
+    metrics = config.get("metrics")
+    if not isinstance(metrics, list) or not all(isinstance(item, str) for item in metrics):
+        raise ValueError("bc-row requires a YAML metrics list")
+    selected = tuple(canonical_metric(item) for item in metrics
+                     if re.fullmatch(r"B_[AB][knr]|C_?[knr]{2}", item.strip()))
+    if not selected or len(set(selected)) != len(selected):
+        raise ValueError("bc-row requires non-empty, unique B/C metrics")
+    return selected
+
+
+def load_results(config_path: Path, parameters=PARAMETERS) -> dict:
     config = yaml.safe_load(config_path.read_text())
     if not isinstance(config, dict):
         raise ValueError("The config must be a YAML mapping.")
@@ -113,10 +129,10 @@ def load_results(config_path: Path) -> dict:
         try:
             # Reuse combined-text/JSON/CSV parsing, aliases, uncertainty and sensitivity.
             measurements = extract_measurements(path)
-            missing = [metric for metric in PARAMETERS if metric not in measurements]
+            missing = [metric for metric in parameters if metric not in measurements]
             if missing:
                 raise ValueError("missing required combined parameters: " + ", ".join(missing))
-            for metric in PARAMETERS:
+            for metric in parameters:
                 row = measurements[metric]
                 if row["err_up"] <= 0 or row["err_down"] <= 0:
                     raise ValueError(f"{metric} needs strictly positive asymmetric uncertainties")
@@ -187,7 +203,7 @@ def draw_panel(ax, results: dict, title: str, metrics: tuple, field: str, labels
 
 
 def make_figures(results: dict, output_dir: Path, formats: list[str], dpi: int,
-                 full_dataset_size=None) -> list[Path]:
+                 full_dataset_size=None, row_metrics=None) -> list[Path]:
     sizes = sorted({size for size, _ in results})
     full_dataset_size = full_dataset_size or max(sizes)
     labels = {size: dataset_size_label(size, full_dataset_size) for size in sizes}
@@ -207,6 +223,14 @@ def make_figures(results: dict, output_dir: Path, formats: list[str], dpi: int,
         plt.close(fig)
 
     with plt.rc_context(STYLE):
+        if row_metrics is not None:
+            fig, ax = plt.subplots(figsize=(max(7, len(row_metrics) * 1.15), 3.8))
+            fig.subplots_adjust(left=0.065, right=0.99, bottom=0.19, top=0.73 - legend_extra)
+            draw_panel(ax, results, "Polarization and spin correlation", row_metrics,
+                       "uncertainty", labels, colors)
+            legends_and_note(fig, results, labels, colors)
+            save(fig, "ml4jets_bc_uncertainty_row")
+            return outputs
         for stem, title, metrics, field in FIGURES:
             fig, ax = plt.subplots(figsize=(max(4.8, len(sizes) * 1.1), 3.6))
             fig.subplots_adjust(left=0.17, right=0.97, bottom=0.19, top=0.73 - legend_extra)
@@ -222,7 +246,7 @@ def make_figures(results: dict, output_dir: Path, formats: list[str], dpi: int,
     return outputs
 
 
-def print_ratios(results, full_dataset_size=None):
+def print_ratios(results, full_dataset_size=None, parameters=PARAMETERS):
     sizes = sorted({size for size, _ in results})
     full_dataset_size = full_dataset_size or max(sizes)
     paired = [size for size in sizes if all((size, method) in results for method in ("Baseline", "DGPO"))]
@@ -231,9 +255,10 @@ def print_ratios(results, full_dataset_size=None):
         print("No dataset sizes have both Baseline and DGPO results.")
         return
     print(f"{'Parameter':<15}" + "".join(f"{dataset_size_label(size, full_dataset_size):>14}" for size in paired))
-    for metric, label in zip(PARAMETERS, PARAMETER_LABELS):
+    for metric in parameters:
         ratios = [results[(size, "DGPO")][metric]["uncertainty"] /
                   results[(size, "Baseline")][metric]["uncertainty"] for size in paired]
+        label = PARAMETER_LABELS[PARAMETERS.index(metric)] if metric in PARAMETERS else metric
         print(f"{label:<15}" + "".join(f"{ratio:>14.4f}" for ratio in ratios))
 
 
@@ -283,6 +308,38 @@ def self_test():
         with redirect_stdout(output):
             print_ratios(results, 5_000_000)
         assert "10%" in output.getvalue()
+        # Exercise all nine independent C entries through the production parser.
+        raw_metrics = ["B_Ak", "B_An", "B_Ar"] + [f"C_{i}{j}" for i in "knr" for j in "knr"]
+        config["metrics"] = raw_metrics + ["Concurrence", "Ckk + Cnn"]
+        row_metrics = bc_row_metrics(config)
+        assert len(row_metrics) == 12 and "Ckn" in row_metrics and "Cnk" in row_metrics
+        assert canonical_metric("C_nn + C_rk") == "Cnn + Crk"
+        try:
+            bc_row_metrics({"metrics": ["C_kn", "Ckn"]})
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("Duplicate aliases were accepted")
+        config_path.write_text(yaml.safe_dump(config))
+        result_path.write_text("Combined fit regions: test\n" + "\n".join(
+            f"{metric} 0.5 +{0.02 * (index + 1)} -{0.01 * (index + 1)}"
+            for index, metric in enumerate(raw_metrics)))
+        row_results = load_results(config_path, row_metrics)
+        assert row_results[series[0]]["Ckn"] != row_results[series[0]]["Cnk"]
+        fig, ax = plt.subplots()
+        draw_panel(ax, row_results, "test", row_metrics, "uncertainty", labels, colors)
+        assert len(ax.patches) == 12 * len(series)
+        assert [tick.get_text() for tick in ax.get_xticklabels()] == [MATH_LABELS[m] for m in row_metrics]
+        assert np.allclose([bar.get_height() for bar in ax.patches[:12]],
+                           [0.015 * (index + 1) for index in range(12)])
+        plt.close(fig)
+        result_path.write_text(result_path.read_text().replace("C_rn", "unused"))
+        try:
+            load_results(config_path, row_metrics)
+        except ValueError as exc:
+            assert "Crn" in str(exc) and "No figures written" in str(exc)
+        else:
+            raise AssertionError("A missing off-diagonal measurement was accepted")
         result_path.write_text("Region: test\nConcurrence 0.5 +0.2 -0.1\n")
         try:
             load_results(config_path)
@@ -290,7 +347,7 @@ def self_test():
             assert "No figures written" in str(exc)
         else:
             raise AssertionError("Per-channel results were accepted as combined")
-    print("Self-test passed: YAML selection including 10%, full-size DGPO, parsing, bars, ratios, validation.")
+    print("Self-test passed: YAML selection, parsing, bars, ratios, all nine C entries, missing-metric validation.")
 
 
 def main():
@@ -299,6 +356,8 @@ def main():
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--formats", nargs="+", choices=("png", "pdf", "svg"), default=["png", "pdf", "svg"])
     parser.add_argument("--dpi", type=int, default=600)
+    parser.add_argument("--layout", choices=("summary", "bc-row"), default="summary",
+                        help="bc-row plots individual B/C entries from YAML metrics in one row")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
     if args.self_test:
@@ -319,17 +378,21 @@ def main():
                 isinstance(full_dataset_size, bool) or not isinstance(full_dataset_size, (int, float))
                 or not math.isfinite(full_dataset_size) or full_dataset_size <= 0):
             raise ValueError("plot.full_dataset_size must be a positive finite number")
-        results = load_results(args.config)
+        row_metrics = bc_row_metrics(config) if args.layout == "bc-row" else None
+        parameters = row_metrics if row_metrics is not None else PARAMETERS
+        results = load_results(args.config, parameters)
     except (ValueError, OSError, yaml.YAMLError) as exc:
         parser.exit(2, f"Error: {exc}\n")
-    outputs = make_figures(results, args.output_dir, list(dict.fromkeys(args.formats)), args.dpi, full_dataset_size)
+    outputs = make_figures(results, args.output_dir, list(dict.fromkeys(args.formats)), args.dpi,
+                           full_dataset_size, row_metrics)
     print("\nGenerated files:")
     for path in outputs:
         print(path)
-    print_ratios(results, full_dataset_size)
+    print_ratios(results, full_dataset_size, parameters)
     print("\nRun command:\n" + shlex.join([
         "python3", str(Path(__file__).resolve()), "--config", str(args.config),
         "--output-dir", str(args.output_dir), "--formats", *args.formats, "--dpi", str(args.dpi),
+        "--layout", args.layout,
     ]))
 
 
