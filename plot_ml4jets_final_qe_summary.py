@@ -12,10 +12,10 @@ existing value / uncertainty-toward-zero implementation. Ratios are DGPO /
 baseline precision, not significance ratios. Training dataset size controls color; only hatch
 distinguishes DGPO. B_Ak, B_An, B_Ar are displayed as B_k, B_n, B_r.
 
-The five figures are exported in PNG/PDF/SVG by default. The console lists all
-outputs, the seven precision ratios at each paired dataset size, and a rerun command.
-Use --layout bc-row for one row of individual B/C uncertainties, selected and
-ordered by YAML metrics. C_ij and Cij are aliases; Cij and Cji remain distinct.
+By default, export one row of individual B/C uncertainties with numeric bar labels
+in PNG/PDF/SVG, selected and ordered by YAML metrics. Use --layout summary for the
+original five figures. The console lists outputs, precision ratios at each paired
+dataset size, and a rerun command. C_ij and Cij are aliases; Cij and Cji remain distinct.
 Run --self-test for a small check of selection and asymmetric metric handling.
 """
 
@@ -362,8 +362,8 @@ def main():
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--formats", nargs="+", choices=("png", "pdf", "svg"), default=["png", "pdf", "svg"])
     parser.add_argument("--dpi", type=int, default=600)
-    parser.add_argument("--layout", choices=("summary", "bc-row"), default="summary",
-                        help="bc-row plots individual B/C entries from YAML metrics in one row")
+    parser.add_argument("--layout", choices=("summary", "bc-row"), default="bc-row",
+                        help="bc-row (default) plots individual B/C entries from YAML metrics in one row")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
     if args.self_test:
