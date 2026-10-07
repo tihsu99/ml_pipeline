@@ -12,10 +12,10 @@ dataset_sizes_config: uncertainty_scaling.yaml
 full_dataset_size: 5000000
 skip_missing_inputs: true  # Only unavailable prediction paths; malformed data still fail.
 methods:
-  baseline_50k:
-    pipeline: pipelines/baseline_pct0p01.yaml
-  DGPO_50k:
-    pipeline: pipelines/DGPO_pct0p01.yaml
+#  baseline_50k:
+#    pipeline: pipelines/baseline_pct0p01.yaml
+#  DGPO_50k:
+#    pipeline: pipelines/DGPO_pct0p01.yaml
   baseline_250k:
     pipeline: pipelines/baseline_pct0p05.yaml
   DGPO_250k:
